@@ -14,21 +14,17 @@ out vec2 v_extrude;
 layout (std140) uniform HeatmapDrawableUBO {
     highp mat4 u_matrix;
     highp float u_extrude_scale;
-    lowp float pad1_;
-    lowp vec2 pad2_;
+    // Interpolations
+    lowp float u_weight_t;
+    lowp float u_radius_t;
+    lowp float drawable_pad1;
 };
 
 layout (std140) uniform HeatmapEvaluatedPropsUBO {
     highp float u_weight;
     highp float u_radius;
     highp float u_intensity;
-    lowp float pad0_;
-};
-
-layout (std140) uniform HeatmapInterpolateUBO {
-    lowp float u_weight_t;
-    lowp float u_radius_t;
-    lowp vec2 pad3_;
+    lowp float props_pad1;
 };
 
 #ifndef HAS_UNIFORM_u_weight
@@ -95,7 +91,7 @@ layout (std140) uniform HeatmapEvaluatedPropsUBO {
     highp float u_weight;
     highp float u_radius;
     highp float u_intensity;
-    lowp float pad0_;
+    lowp float props_pad1;
 };
 
 #ifndef HAS_UNIFORM_u_weight

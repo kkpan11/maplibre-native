@@ -1,7 +1,6 @@
 #include <mbgl/mtl/tile_layer_group.hpp>
 
 #include <mbgl/gfx/drawable_tweaker.hpp>
-#include <mbgl/gfx/render_pass.hpp>
 #include <mbgl/gfx/renderable.hpp>
 #include <mbgl/gfx/renderer_backend.hpp>
 #include <mbgl/gfx/upload_pass.hpp>
@@ -43,7 +42,7 @@ void TileLayerGroup::render(RenderOrchestrator&, PaintParameters& parameters) {
     }
 
     auto& context = static_cast<Context&>(parameters.context);
-    const auto& renderPass = static_cast<const mtl::RenderPass&>(*parameters.renderPass);
+    auto& renderPass = static_cast<RenderPass&>(*parameters.renderPass);
     const auto& encoder = renderPass.getMetalEncoder();
     const auto& renderable = renderPass.getDescriptor().renderable;
 
@@ -74,19 +73,54 @@ void TileLayerGroup::render(RenderOrchestrator&, PaintParameters& parameters) {
     // If we're doing 3D stenciling and have any features to draw, set up the single-value stencil mask.
     // If we're doing 2D stenciling and have any drawables with tile IDs, render each tile into the stencil buffer with
     // a different value.
-    MTLDepthStencilStatePtr stateWithStencil, stateWithoutStencil;
+    // We can keep the depth-based descriptors, but the stencil-based ones can change
+    // every time, as a new value is assigned in each call to `stencilModeFor3D`.
+    std::optional<MTLDepthStencilStatePtr> stateStencil, stateDepthStencil;
+    std::function<const MTLDepthStencilStatePtr&(bool, bool)> getDepthStencilState;
     if (features3d) {
+        // If we're using group-wide states, build only the ones that actually get used
+        getDepthStencilState = [&](bool depth, bool stencil) -> const MTLDepthStencilStatePtr& {
+            if (depth) {
+                // We assume this doesn't change over the lifetime of a layer group.
+                const auto depthMode = parameters.depthModeFor3D();
+                if (stencil) {
+                    if (!stateDepthStencil.has_value()) {
+                        stateDepthStencil = context.makeDepthStencilState(depthMode, stencilMode3d, renderable);
+                    }
+                    return *stateDepthStencil;
+                } else {
+                    if (!stateDepth) {
+                        stateDepth = context.makeDepthStencilState(depthMode, gfx::StencilMode::disabled(), renderable);
+                    }
+                    return *stateDepth;
+                }
+            } else {
+                if (stencil) {
+                    if (!stateStencil.has_value()) {
+                        stateStencil = context.makeDepthStencilState(
+                            gfx::DepthMode::disabled(), stencilMode3d, renderable);
+                    }
+                    return *stateStencil;
+                } else {
+                    if (!stateNone) {
+                        stateNone = context.makeDepthStencilState(
+                            gfx::DepthMode::disabled(), gfx::StencilMode::disabled(), renderable);
+                    }
+                    return *stateNone;
+                }
+            }
+        };
+
         const auto depthMode = parameters.depthModeFor3D();
         if (stencil3d) {
             stencilMode3d = parameters.stencilModeFor3D();
-            stateWithStencil = context.makeDepthStencilState(depthMode, stencilMode3d, renderable);
             encoder->setStencilReferenceValue(stencilMode3d.ref);
         }
-        stateWithoutStencil = context.makeDepthStencilState(depthMode, gfx::StencilMode::disabled(), renderable);
     } else if (stencilTiles && !stencilTiles->empty()) {
         parameters.renderTileClippingMasks(stencilTiles);
     }
 
+    bool bindUBOs = false;
     visitDrawables([&](gfx::Drawable& drawable) {
         if (!drawable.getEnabled() || !drawable.hasRenderPass(parameters.pass)) {
             return;
@@ -100,14 +134,21 @@ void TileLayerGroup::render(RenderOrchestrator&, PaintParameters& parameters) {
         // stencil mode for features with stencil enabled or disable stenciling.
         // 2D drawables will set their own stencil mode within `draw`.
         if (features3d) {
-            const auto& state = drawable.getEnableStencil() ? stateWithStencil : stateWithoutStencil;
-            if (state) {
-                encoder->setDepthStencilState(state.get());
-            }
+            const auto state = getDepthStencilState(drawable.getEnableDepth(), drawable.getEnableStencil());
+            renderPass.setDepthStencilState(state);
+        }
+
+        if (!bindUBOs) {
+            uniformBuffers.bind(renderPass);
+            bindUBOs = true;
         }
 
         drawable.draw(parameters);
     });
+
+    if (bindUBOs) {
+        uniformBuffers.unbind(renderPass);
+    }
 }
 
 } // namespace mtl

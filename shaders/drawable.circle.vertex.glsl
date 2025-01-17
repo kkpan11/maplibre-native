@@ -1,16 +1,32 @@
 layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
 
+layout (std140) uniform GlobalPaintParamsUBO {
+    highp vec2 u_pattern_atlas_texsize;
+    highp vec2 u_units_to_pixels;
+    highp vec2 u_world_size;
+    highp float u_camera_to_center_distance;
+    highp float u_symbol_fade_change;
+    highp float u_aspect_ratio;
+    highp float u_pixel_ratio;
+    highp float u_map_zoom;
+    lowp float global_pad1;
+};
+
 layout (std140) uniform CircleDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_extrude_scale;
-    lowp vec2 pad2_;
-};
-
-layout (std140) uniform CirclePaintParamsUBO {
-    highp float u_camera_to_center_distance;
-    lowp float u_device_pixel_ratio;
-    lowp vec2 pad3_;
+    // Interpolations
+    lowp float u_color_t;
+    lowp float u_radius_t;
+    lowp float u_blur_t;
+    lowp float u_opacity_t;
+    lowp float u_stroke_color_t;
+    lowp float u_stroke_width_t;
+    lowp float u_stroke_opacity_t;
+    lowp float drawable_pad1;
+    lowp float drawable_pad2;
+    lowp float drawable_pad3;
 };
 
 layout (std140) uniform CircleEvaluatedPropsUBO {
@@ -23,18 +39,7 @@ layout (std140) uniform CircleEvaluatedPropsUBO {
     lowp float u_stroke_opacity;
     bool u_scale_with_map;
     bool u_pitch_with_map;
-    lowp float pad0_;
-};
-
-layout (std140) uniform CircleInterpolateUBO {
-    lowp float u_color_t;
-    lowp float u_radius_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_stroke_color_t;
-    lowp float u_stroke_width_t;
-    lowp float u_stroke_opacity_t;
-    lowp float pad1_;
+    lowp float props_pad1;
 };
 
 #pragma mapbox: define highp vec4 color
@@ -86,7 +91,7 @@ void main(void) {
     // This is a minimum blur distance that serves as a faux-antialiasing for
     // the circle. since blur is a ratio of the circle's size and the intent is
     // to keep the blur at roughly 1px, the two are inversely related.
-    lowp float antialiasblur = 1.0 / u_device_pixel_ratio / (radius + stroke_width);
+    lowp float antialiasblur = 1.0 / DEVICE_PIXEL_RATIO / (radius + stroke_width);
 
     v_data = vec3(extrude.x, extrude.y, antialiasblur);
 }

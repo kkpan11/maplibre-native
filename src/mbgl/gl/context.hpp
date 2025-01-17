@@ -10,13 +10,17 @@
 #include <mbgl/gl/state.hpp>
 #include <mbgl/gl/value.hpp>
 #include <mbgl/gl/framebuffer.hpp>
+#include <mbgl/gl/resource_pool.hpp>
 #include <mbgl/gl/vertex_array.hpp>
 #include <mbgl/gl/types.hpp>
 #include <mbgl/platform/gl_functions.hpp>
 #include <mbgl/util/noncopyable.hpp>
 
 #if MLN_DRAWABLE_RENDERER
+#include <mbgl/gl/fence.hpp>
+#include <mbgl/gl/buffer_allocator.hpp>
 #include <mbgl/gfx/texture2d.hpp>
+#include <mbgl/gl/uniform_buffer_gl.hpp>
 #endif
 
 #include <array>
@@ -26,7 +30,6 @@
 namespace mbgl {
 namespace gl {
 
-constexpr size_t TextureMax = 64;
 using ProcAddress = void (*)();
 class RendererBackend;
 
@@ -44,6 +47,11 @@ public:
 
     std::unique_ptr<gfx::CommandEncoder> createCommandEncoder() override;
 
+    gfx::ContextObserver& getObserver() const { return *observer; }
+
+    void beginFrame() override;
+    void endFrame() override;
+
     void initializeExtensions(const std::function<gl::ProcAddress(const char*)>&);
 
     void enableDebugging();
@@ -52,7 +60,7 @@ public:
     UniqueProgram createProgram(ShaderID vertexShader, ShaderID fragmentShader, const char* location0AttribName);
     void verifyProgramLinkage(ProgramID);
     void linkProgram(ProgramID);
-    UniqueTexture createUniqueTexture();
+    UniqueTexture createUniqueTexture(const Size& size, gfx::TexturePixelType format, gfx::TextureChannelDataType type);
 
     Framebuffer createFramebuffer(const gfx::Renderbuffer<gfx::RenderbufferPixelType::RGBA>&,
                                   const gfx::Renderbuffer<gfx::RenderbufferPixelType::DepthStencil>&);
@@ -81,20 +89,29 @@ public:
 
     void finish();
 
+#if MLN_DRAWABLE_RENDERER
+    std::shared_ptr<gl::Fence> getCurrentFrameFence() const;
+#endif
+
     // Actually remove the objects we marked as abandoned with the above methods.
     // Only call this while the OpenGL context is exclusive to this thread.
+    // Pooled textures are retained
     void performCleanup() override;
 
+    // Called when the app receives a memory warning and before it goes to the background.
+    // Calls performCleanup and destroy all pooled resources
     void reduceMemoryUsage() override;
 
     // Drain pools and remove abandoned objects, in preparation for destroying the store.
     // Only call this while the OpenGL context is exclusive to this thread.
     void reset();
 
-    bool empty() const {
-        return pooledTextures.empty() && abandonedPrograms.empty() && abandonedShaders.empty() &&
-               abandonedBuffers.empty() && abandonedTextures.empty() && abandonedVertexArrays.empty() &&
-               abandonedFramebuffers.empty();
+    // Returns whether there are any objects that need to be cleaned up.
+    // If considerPool is true, it will also check if resources are still pooled.
+    bool empty(bool considerPool = false) const {
+        return abandonedPrograms.empty() && abandonedShaders.empty() && abandonedBuffers.empty() &&
+               abandonedTextures.empty() && abandonedVertexArrays.empty() && abandonedFramebuffers.empty() &&
+               (considerPool ? texturePool->empty() : true);
     }
 
     extension::Debugging* getDebuggingExtension() const { return debugging.get(); }
@@ -103,7 +120,10 @@ public:
 
 #if MLN_DRAWABLE_RENDERER
     gfx::UniqueDrawableBuilder createDrawableBuilder(std::string name) override;
-    gfx::UniformBufferPtr createUniformBuffer(const void* data, std::size_t size, bool persistent) override;
+    gfx::UniformBufferPtr createUniformBuffer(const void* data,
+                                              std::size_t size,
+                                              bool persistent = false,
+                                              bool ssbo = false) override;
 
     gfx::ShaderProgramBasePtr getGenericShader(gfx::ShaderRegistry&, const std::string& name) override;
 
@@ -117,21 +137,43 @@ public:
 
     Framebuffer createFramebuffer(const gfx::Texture2D& color);
 
+    gfx::VertexAttributeArrayPtr createVertexAttributeArray() const override;
+
     void resetState(gfx::DepthMode depthMode, gfx::ColorMode colorMode) override;
 
     bool emplaceOrUpdateUniformBuffer(gfx::UniformBufferPtr&,
                                       const void* data,
                                       std::size_t size,
                                       bool persistent) override;
+
+    /// Get the global uniform buffers
+    const gfx::UniformBufferArray& getGlobalUniformBuffers() const override { return globalUniformBuffers; };
+
+    /// Get the mutable global uniform buffer array
+    gfx::UniformBufferArray& mutableGlobalUniformBuffers() override { return globalUniformBuffers; };
+
+    /// Bind the global uniform buffers
+    void bindGlobalUniformBuffers(gfx::RenderPass&) const noexcept override;
+
+    /// Unbind the global uniform buffers
+    void unbindGlobalUniformBuffers(gfx::RenderPass&) const noexcept override;
 #endif
 
     void setDirtyState() override;
+
+    Texture2DPool& getTexturePool();
 
 private:
     RendererBackend& backend;
     bool cleanupOnDestruction = true;
 
     std::unique_ptr<extension::Debugging> debugging;
+#if MLN_DRAWABLE_RENDERER
+    std::shared_ptr<gl::Fence> frameInFlightFence;
+    std::unique_ptr<gl::UniformBufferAllocator> uboAllocator;
+    size_t frameNum = 0;
+    UniformBufferArrayGL globalUniformBuffers;
+#endif
 
 public:
     State<value::ActiveTextureUnit> activeTextureUnit;
@@ -153,7 +195,9 @@ private:
     State<value::StencilMask> stencilMask;
     State<value::StencilTest> stencilTest;
     State<value::StencilOp> stencilOp;
+#if MLN_RENDER_BACKEND_OPENGL
     State<value::DepthRange> depthRange;
+#endif
     State<value::DepthMask> depthMask;
     State<value::DepthTest> depthTest;
     State<value::DepthFunc> depthFunc;
@@ -198,8 +242,6 @@ private:
     friend detail::FramebufferDeleter;
     friend detail::RenderbufferDeleter;
 
-    std::vector<TextureID> pooledTextures;
-
     std::vector<ProgramID> abandonedPrograms;
     std::vector<ShaderID> abandonedShaders;
     std::vector<BufferID> abandonedBuffers;
@@ -207,6 +249,8 @@ private:
     std::vector<VertexArrayID> abandonedVertexArrays;
     std::vector<FramebufferID> abandonedFramebuffers;
     std::vector<RenderbufferID> abandonedRenderbuffers;
+
+    std::unique_ptr<Texture2DPool> texturePool;
 
 public:
 #if !defined(NDEBUG)

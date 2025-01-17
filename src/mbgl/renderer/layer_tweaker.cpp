@@ -9,7 +9,6 @@
 #include <mbgl/util/containers.hpp>
 
 #if MLN_RENDER_BACKEND_METAL
-#include <mbgl/shaders/layer_ubo.hpp>
 #include <mbgl/util/monotonic_timer.hpp>
 #include <chrono>
 #endif // MLN_RENDER_BACKEND_METAL
@@ -32,17 +31,15 @@ mat4 LayerTweaker::getTileMatrix(const UnwrappedTileID& tileID,
                                  style::TranslateAnchorType anchor,
                                  bool nearClipped,
                                  bool inViewportPixelUnits,
+                                 const gfx::Drawable& drawable,
                                  bool aligned) {
     // from RenderTile::prepare
     mat4 tileMatrix;
     parameters.state.matrixFor(/*out*/ tileMatrix, tileID);
-
-    // nearClippedMatrix has near plane moved further, to enhance depth buffer precision
-    const auto& projMatrix = aligned ? parameters.transformParams.alignedProjMatrix
-                                     : (nearClipped ? parameters.transformParams.nearClippedProjMatrix
-                                                    : parameters.transformParams.projMatrix);
-    matrix::multiply(tileMatrix, projMatrix, tileMatrix);
-
+    if (const auto& origin{drawable.getOrigin()}; origin.has_value()) {
+        matrix::translate(tileMatrix, tileMatrix, origin->x, origin->y, 0);
+    }
+    multiplyWithProjectionMatrix(/*in-out*/ tileMatrix, parameters, drawable, nearClipped, aligned);
     return RenderTile::translateVtxMatrix(
         tileID, tileMatrix, translation, anchor, parameters.state, inViewportPixelUnits);
 }
@@ -52,49 +49,31 @@ void LayerTweaker::updateProperties(Immutable<style::LayerProperties> newProps) 
     propertiesUpdated = true;
 }
 
-#if MLN_RENDER_BACKEND_METAL
-shaders::ExpressionInputsUBO LayerTweaker::buildExpressionUBO(double zoom, uint64_t frameCount) {
-    const auto time = util::MonotonicTimer::now();
-    const auto time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(time).count();
-    return {/* .time_lo = */ static_cast<uint32_t>(time_ns),
-            /* .time_hi = */ static_cast<uint32_t>(time_ns >> 32),
-            /* .frame_lo = */ static_cast<uint32_t>(frameCount),
-            /* .frame_hi = */ static_cast<uint32_t>(frameCount >> 32),
-            /* .zoom = */ static_cast<float>(zoom),
-            /* .zoom_frac = */ static_cast<float>(zoom - static_cast<float>(zoom)),
-            /* .pad = */ 0,
-            0};
-}
-#endif // MLN_RENDER_BACKEND_METAL
-
-void LayerTweaker::setPropertiesAsUniforms([[maybe_unused]] const mbgl::unordered_set<StringIdentity>& props) {
-#if MLN_RENDER_BACKEND_METAL
-    if (props != propertiesAsUniforms) {
-        propertiesAsUniforms = props;
-        permutationUpdated = true;
+void LayerTweaker::multiplyWithProjectionMatrix(/*in-out*/ mat4& matrix,
+                                                const PaintParameters& parameters,
+                                                [[maybe_unused]] const gfx::Drawable& drawable,
+                                                bool nearClipped,
+                                                bool aligned) {
+    // nearClippedMatrix has near plane moved further, to enhance depth buffer precision
+    const auto& projMatrixRef = aligned ? parameters.transformParams.alignedProjMatrix
+                                        : (nearClipped ? parameters.transformParams.nearClippedProjMatrix
+                                                       : parameters.transformParams.projMatrix);
+#if !MLN_RENDER_BACKEND_OPENGL
+    // If this drawable is participating in depth testing, offset the
+    // projection matrix NDC depth range for the drawable's layer and sublayer.
+    if (!drawable.getIs3D() && drawable.getEnableDepth()) {
+        // copy and adjust the projection matrix
+        mat4 projMatrix = projMatrixRef;
+        projMatrix[14] -= ((1 + parameters.currentLayer) * PaintParameters::numSublayers -
+                           drawable.getSubLayerIndex()) *
+                          PaintParameters::depthEpsilon;
+        // multiply with the copy
+        matrix::multiply(matrix, projMatrix, matrix);
+        // early return
+        return;
     }
 #endif
-}
-
-#if !MLN_RENDER_BACKEND_METAL
-namespace {
-const mbgl::unordered_set<StringIdentity> emptyIDSet;
-}
-#endif
-
-const mbgl::unordered_set<StringIdentity>& LayerTweaker::getPropertiesAsUniforms() const {
-#if MLN_RENDER_BACKEND_METAL
-    return propertiesAsUniforms;
-#else
-    return emptyIDSet;
-#endif
-}
-
-void LayerTweaker::enableOverdrawInspector(bool value) {
-    if (overdrawInspector != value) {
-        overdrawInspector = value;
-        permutationUpdated = true;
-    }
+    matrix::multiply(matrix, projMatrixRef, matrix);
 }
 
 } // namespace mbgl

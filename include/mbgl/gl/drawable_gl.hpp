@@ -5,7 +5,6 @@
 #include <mbgl/gl/vertex_array.hpp>
 #include <mbgl/gl/vertex_attribute_gl.hpp>
 #include <mbgl/programs/segment.hpp>
-#include <mbgl/util/string_indexer.hpp>
 
 #include <memory>
 
@@ -13,6 +12,7 @@ namespace mbgl {
 
 template <class AttributeList>
 class Segment;
+class PaintParameters;
 
 namespace gfx {
 
@@ -41,18 +41,19 @@ public:
 
     void setVertices(std::vector<uint8_t>&&, std::size_t, gfx::AttributeDataType) override;
 
-    const gfx::VertexAttributeArray& getVertexAttributes() const override;
-    void setVertexAttributes(const gfx::VertexAttributeArray& value) override;
-    void setVertexAttributes(gfx::VertexAttributeArray&& value) override;
-
-    gfx::VertexAttributeArray& mutableVertexAttributes() override;
-
     const gfx::UniformBufferArray& getUniformBuffers() const override;
     gfx::UniformBufferArray& mutableUniformBuffers() override;
 
-    void setVertexAttrNameId(const StringIdentity id);
+    void setVertexAttrId(const size_t id);
 
     void upload(gfx::UploadPass&);
+
+    void updateVertexAttributes(gfx::VertexAttributeArrayPtr,
+                                std::size_t vertexCount,
+                                gfx::DrawMode,
+                                gfx::IndexVectorBasePtr,
+                                const SegmentBase* segments,
+                                std::size_t segmentCount) override;
 
 protected:
     class Impl;
@@ -66,9 +67,6 @@ private:
     gfx::StencilMode makeStencilMode(PaintParameters&) const;
 
     void uploadTextures() const;
-
-    void bindUniformBuffers() const;
-    void unbindUniformBuffers() const;
 
     void bindTextures() const;
     void unbindTextures() const;

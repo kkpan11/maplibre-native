@@ -13,12 +13,6 @@ layout (location = 1) in vec2 a_texture_pos;
 
 layout (std140) uniform HillshadeDrawableUBO {
     highp mat4 u_matrix;
-    highp vec2 u_latrange;
-    highp vec2 u_light;
-    lowp float pad0_;
-    lowp float pad1_;
-    lowp float pad2_;
-    lowp float pad3_;
 };
 
 out vec2 v_pos;
@@ -31,14 +25,9 @@ void main() {
     static constexpr const char* fragment = R"(in vec2 v_pos;
 uniform sampler2D u_image;
 
-layout (std140) uniform HillshadeDrawableUBO {
-    highp mat4 u_matrix;
+layout (std140) uniform HillshadeTilePropsUBO {
     highp vec2 u_latrange;
     highp vec2 u_light;
-    lowp float pad0_;
-    lowp float pad1_;
-    lowp float pad2_;
-    lowp float pad3_;
 };
 
 layout (std140) uniform HillshadeEvaluatedPropsUBO {

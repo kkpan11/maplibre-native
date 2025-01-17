@@ -1,24 +1,40 @@
 #include <mbgl/shaders/mtl/fill_extrusion.hpp>
+#include <mbgl/shaders/shader_defines.hpp>
 
 namespace mbgl {
 namespace shaders {
 
-const std::array<AttributeInfo, 5> ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Metal>::attributes = {
-    AttributeInfo{0, gfx::AttributeDataType::Short2, 1, "a_pos"},
-    AttributeInfo{1, gfx::AttributeDataType::Short4, 1, "a_normal_ed"},
-    AttributeInfo{2, gfx::AttributeDataType::Float4, 1, "a_color"},
-    AttributeInfo{3, gfx::AttributeDataType::Float, 1, "a_base"},
-    AttributeInfo{4, gfx::AttributeDataType::Float, 1, "a_height"},
+//
+// Fill extrusion
+
+using FillExtrusionShaderSource = ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Metal>;
+
+const std::array<AttributeInfo, 5> FillExtrusionShaderSource::attributes = {
+    AttributeInfo{fillExtrusionUBOCount + 0, gfx::AttributeDataType::Short2, idFillExtrusionPosVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 1, gfx::AttributeDataType::Short4, idFillExtrusionNormalEdVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 2, gfx::AttributeDataType::Float4, idFillExtrusionColorVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 3, gfx::AttributeDataType::Float, idFillExtrusionBaseVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 4, gfx::AttributeDataType::Float, idFillExtrusionHeightVertexAttribute},
 };
-const std::array<UniformBlockInfo, 5> ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Metal>::uniforms =
-    {
-        UniformBlockInfo{5, true, false, sizeof(FillExtrusionDrawableUBO), "FillExtrusionDrawableUBO"},
-        UniformBlockInfo{6, true, false, sizeof(FillExtrusionDrawablePropsUBO), "FillExtrusionDrawablePropsUBO"},
-        UniformBlockInfo{7, true, false, sizeof(FillExtrusionInterpolateUBO), "FillExtrusionInterpolateUBO"},
-        UniformBlockInfo{8, true, false, sizeof(FillExtrusionPermutationUBO), "FillExtrusionPermutationUBO"},
-        UniformBlockInfo{9, true, false, sizeof(ExpressionInputsUBO), "ExpressionInputsUBO"},
+const std::array<TextureInfo, 0> FillExtrusionShaderSource::textures = {};
+
+//
+// Fill extrusion pattern
+
+using FillExtrusionPatternShaderSource = ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::Metal>;
+
+const std::array<AttributeInfo, 6> FillExtrusionPatternShaderSource::attributes = {
+    AttributeInfo{fillExtrusionUBOCount + 0, gfx::AttributeDataType::Short2, idFillExtrusionPosVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 1, gfx::AttributeDataType::Short4, idFillExtrusionNormalEdVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 2, gfx::AttributeDataType::Float, idFillExtrusionBaseVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 3, gfx::AttributeDataType::Float, idFillExtrusionHeightVertexAttribute},
+    AttributeInfo{
+        fillExtrusionUBOCount + 4, gfx::AttributeDataType::UShort4, idFillExtrusionPatternFromVertexAttribute},
+    AttributeInfo{fillExtrusionUBOCount + 5, gfx::AttributeDataType::UShort4, idFillExtrusionPatternToVertexAttribute},
 };
-const std::array<TextureInfo, 0> ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Metal>::textures = {};
+const std::array<TextureInfo, 1> FillExtrusionPatternShaderSource::textures = {
+    TextureInfo{0, idFillExtrusionImageTexture},
+};
 
 } // namespace shaders
 } // namespace mbgl

@@ -21,9 +21,6 @@ namespace mbgl {
 using namespace style;
 using namespace shaders;
 
-const StringIdentity CollisionLayerTweaker::idCollisionCircleUBOName = stringIndexer().get(CollisionCircleUBOName);
-const StringIdentity CollisionLayerTweaker::idCollisionBoxUBOName = stringIndexer().get(CollisionBoxUBOName);
-
 void CollisionLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParameters& parameters) {
     if (layerGroup.empty()) {
         return;
@@ -35,6 +32,8 @@ void CollisionLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParam
     const auto label = layerGroup.getName() + "-update-uniforms";
     const auto debugGroup = parameters.encoder->createDebugGroup(label.c_str());
 #endif
+
+    propertiesUpdated = false;
 
     visitLayerGroupDrawables(layerGroup, [&](gfx::Drawable& drawable) {
         if (!drawable.getTileID() || !drawable.getData() || !checkTweakDrawable(drawable)) {
@@ -49,7 +48,8 @@ void CollisionLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParam
         const auto anchor = data.translateAnchor;
         constexpr bool nearClipped = false;
         constexpr bool inViewportPixelUnits = false;
-        const auto matrix = getTileMatrix(tileID, parameters, translate, anchor, nearClipped, inViewportPixelUnits);
+        const auto matrix = getTileMatrix(
+            tileID, parameters, translate, anchor, nearClipped, inViewportPixelUnits, drawable);
 
         // extrude scale
         const auto pixelRatio = tileID.pixelsToTileUnits(1.0f, static_cast<float>(parameters.state.getZoom()));
@@ -58,25 +58,16 @@ void CollisionLayerTweaker::execute(LayerGroupBase& layerGroup, const PaintParam
         const std::array<float, 2> extrudeScale = {{parameters.pixelsToGLUnits[0] / (pixelRatio * scale),
                                                     parameters.pixelsToGLUnits[1] / (pixelRatio * scale)}};
 
-        const CollisionUBO drawableUBO = {
-            /*.matrix=*/util::cast<float>(matrix),
-            /*.extrude_scale*/ extrudeScale,
-            /*.camera_to_center_distance*/ parameters.state.getCameraToCenterDistance(),
-            /*.overscale_factor*/ static_cast<float>(drawable.getTileID()->overscaleFactor())};
+        const CollisionDrawableUBO drawableUBO = {/* .matrix = */ util::cast<float>(matrix)};
 
-        const auto shader = drawable.getShader();
-        const auto& shaderUniforms = shader->getUniformBlocks();
-        auto& uniforms = drawable.mutableUniformBuffers();
+        const CollisionTilePropsUBO tilePropsUBO = {
+            /* .extrude_scale = */ extrudeScale,
+            /* .overscale_factor = */ static_cast<float>(drawable.getTileID()->overscaleFactor()),
+            /* .pad1 = */ 0};
 
-        if (shaderUniforms.get(idCollisionBoxUBOName)) {
-            // collision box
-            uniforms.createOrUpdate(idCollisionBoxUBOName, &drawableUBO, context);
-        } else if (shaderUniforms.get(idCollisionCircleUBOName)) {
-            // collision circle
-            uniforms.createOrUpdate(idCollisionCircleUBOName, &drawableUBO, context);
-        } else {
-            Log::Error(Event::General, "Collision shader uniform name unknown.");
-        }
+        auto& drawableUniforms = drawable.mutableUniformBuffers();
+        drawableUniforms.createOrUpdate(idCollisionDrawableUBO, &drawableUBO, context);
+        drawableUniforms.createOrUpdate(idCollisionTilePropsUBO, &tilePropsUBO, context);
     });
 }
 

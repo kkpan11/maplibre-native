@@ -18,12 +18,16 @@
 #include <mbgl/shaders/mtl/shader_program.hpp>
 #include <mbgl/util/logging.hpp>
 #include <mbgl/util/variant.hpp>
+#include <mbgl/util/hash.hpp>
 
 #include <Metal/Metal.hpp>
 
 #include <simd/simd.h>
 
 #include <cassert>
+#if !defined(NDEBUG)
+#include <sstream>
+#endif
 
 namespace mbgl {
 namespace mtl {
@@ -72,11 +76,16 @@ MTL::PrimitiveType getPrimitiveType(const gfx::DrawModeType type) noexcept {
 
 #if !defined(NDEBUG)
 std::string debugLabel(const gfx::Drawable& drawable) {
-    std::string result = drawable.getName();
+    std::ostringstream oss;
+    oss << drawable.getID().id() << "/" << drawable.getName() << "/tile=";
+
     if (const auto& tileID = drawable.getTileID()) {
-        result.append("/tile=").append(util::toString(*tileID));
+        oss << util::toString(*tileID);
+    } else {
+        oss << "(none)";
     }
-    return result;
+
+    return oss.str();
 }
 #endif // !defined(NDEBUG)
 
@@ -177,9 +186,15 @@ void Drawable::draw(PaintParameters& parameters) const {
     const auto debugGroup = parameters.encoder->createDebugGroup(debugLabel(*this));
 #endif
 
+    renderPass.unbindVertex(shaders::idGlobalUBOIndex);
+    renderPass.unbindFragment(shaders::idGlobalUBOIndex);
+    encoder->setVertexBytes(&uboIndex, sizeof(uboIndex), shaders::idGlobalUBOIndex);
+    encoder->setFragmentBytes(&uboIndex, sizeof(uboIndex), shaders::idGlobalUBOIndex);
+
     bindAttributes(renderPass);
-    bindUniformBuffers(renderPass);
+    bindInstanceAttributes(renderPass);
     bindTextures(renderPass);
+    impl->uniformBuffers.bind(renderPass);
 
     if (!impl->indexes->getBuffer() || impl->indexes->getDirty()) {
         assert(!"Index buffer not uploaded");
@@ -201,7 +216,11 @@ void Drawable::draw(PaintParameters& parameters) const {
     encoder->setFrontFacingWinding(mapWindingMode(cullMode.winding));
 
     if (!impl->pipelineState) {
-        impl->pipelineState = shaderMTL.getRenderPipelineState(renderable, impl->vertexDesc, getColorMode());
+        impl->pipelineState = shaderMTL.getRenderPipelineState(
+            renderable,
+            impl->vertexDesc,
+            getColorMode(),
+            mbgl::util::hash(getColorMode().hash(), impl->vertexDescHash));
     }
     if (impl->pipelineState) {
         encoder->setRenderPipelineState(impl->pipelineState.get());
@@ -227,16 +246,16 @@ void Drawable::draw(PaintParameters& parameters) const {
             if (enableStencil && !newStencilMode) {
                 newStencilMode = parameters.stencilModeForClipping(tileID->toUnwrapped());
             }
-            const auto depthMode = parameters.depthModeForSublayer(getSubLayerIndex(), getDepthType());
+            const auto depthMode = getEnableDepth()
+                                       ? parameters.depthModeForSublayer(getSubLayerIndex(), getDepthType())
+                                       : gfx::DepthMode::disabled();
             const auto stencilMode = enableStencil ? parameters.stencilModeForClipping(tileID->toUnwrapped())
                                                    : gfx::StencilMode::disabled();
             impl->depthStencilState = context.makeDepthStencilState(depthMode, stencilMode, renderable);
             impl->previousStencilMode = *newStencilMode;
         }
-        if (impl->depthStencilState) {
-            encoder->setDepthStencilState(impl->depthStencilState.get());
-            encoder->setStencilReferenceValue(impl->previousStencilMode.ref);
-        }
+        renderPass.setDepthStencilState(impl->depthStencilState);
+        renderPass.setStencilReference(impl->previousStencilMode.ref);
     }
 
     for (const auto& seg_ : impl->segments) {
@@ -248,7 +267,7 @@ void Drawable::draw(PaintParameters& parameters) const {
             const auto primitiveType = getPrimitiveType(mode.type);
             constexpr auto indexType = MTL::IndexType::IndexTypeUInt16;
             constexpr auto indexSize = sizeof(std::uint16_t);
-            constexpr NS::UInteger instanceCount = 1;
+            const NS::UInteger instanceCount = instanceAttributes ? instanceAttributes->getMaxCount() : 1;
             constexpr NS::UInteger baseInstance = 0;
             const NS::UInteger indexOffset = static_cast<NS::UInteger>(indexSize *
                                                                        mlSegment.indexOffset); // in bytes, not indexes
@@ -278,20 +297,26 @@ void Drawable::draw(PaintParameters& parameters) const {
             assert(static_cast<std::size_t>(maxIndex) < mlSegment.vertexLength);
 #endif
 
-            encoder->drawIndexedPrimitives(primitiveType,
-                                           mlSegment.indexLength,
-                                           indexType,
-                                           indexBuffer,
-                                           indexOffset,
-                                           instanceCount,
-                                           baseVertex,
-                                           baseInstance);
+            if (context.getBackend().isBaseVertexInstanceDrawingSupported()) {
+                encoder->drawIndexedPrimitives(primitiveType,
+                                               mlSegment.indexLength,
+                                               indexType,
+                                               indexBuffer,
+                                               indexOffset,
+                                               instanceCount,
+                                               baseVertex,
+                                               baseInstance);
+            } else {
+                encoder->drawIndexedPrimitives(
+                    primitiveType, mlSegment.indexLength, indexType, indexBuffer, indexOffset, instanceCount);
+            }
+
             context.renderingStats().numDrawCalls++;
         }
     }
 
+    impl->uniformBuffers.unbind(renderPass);
     unbindTextures(renderPass);
-    unbindUniformBuffers(renderPass);
     unbindAttributes(renderPass);
 }
 
@@ -306,32 +331,47 @@ void Drawable::setVertices(std::vector<uint8_t>&& data, std::size_t count, gfx::
     impl->vertexType = type;
 
     if (count && type != gfx::AttributeDataType::Invalid && !data.empty()) {
-        if (auto& attrib = impl->vertexAttributes.getOrAdd(impl->idVertexAttrName, /*index=*/-1, type)) {
+        if (!vertexAttributes) {
+            vertexAttributes = std::make_shared<VertexAttributeArray>();
+        }
+        if (auto& attrib = vertexAttributes->set(impl->vertexAttrId, /*index=*/-1, type)) {
             attrib->setRawData(std::move(data));
             attrib->setStride(VertexAttribute::getStrideOf(type));
         } else {
             using namespace std::string_literals;
-            Log::Warning(
-                Event::General,
-                "Vertex attribute type mismatch: "s + name + " / " + stringIndexer().get(impl->idVertexAttrName));
+            Log::Warning(Event::General,
+                         "Vertex attribute type mismatch: "s + name + " / " + util::toString(impl->vertexAttrId));
             assert(false);
         }
     }
 }
 
-const gfx::VertexAttributeArray& Drawable::getVertexAttributes() const {
-    return impl->vertexAttributes;
-}
+void Drawable::updateVertexAttributes(gfx::VertexAttributeArrayPtr vertices,
+                                      std::size_t vertexCount,
+                                      gfx::DrawMode mode,
+                                      gfx::IndexVectorBasePtr indexes,
+                                      const SegmentBase* segments,
+                                      std::size_t segmentCount) {
+    gfx::Drawable::setVertexAttributes(std::move(vertices));
+    impl->vertexCount = vertexCount;
 
-gfx::VertexAttributeArray& Drawable::mutableVertexAttributes() {
-    return impl->vertexAttributes;
-}
+    std::vector<UniqueDrawSegment> drawSegs;
+    drawSegs.reserve(segmentCount);
+    for (std::size_t i = 0; i < segmentCount; ++i) {
+        const auto& seg = segments[i];
+        auto segCopy = SegmentBase{
+            // no copy constructor
+            seg.vertexOffset,
+            seg.indexOffset,
+            seg.vertexLength,
+            seg.indexLength,
+            seg.sortKey,
+        };
+        drawSegs.push_back(std::make_unique<Drawable::DrawSegment>(mode, std::move(segCopy)));
+    }
 
-void Drawable::setVertexAttributes(const gfx::VertexAttributeArray& value) {
-    impl->vertexAttributes = static_cast<const VertexAttributeArray&>(value);
-}
-void Drawable::setVertexAttributes(gfx::VertexAttributeArray&& value) {
-    impl->vertexAttributes = std::move(static_cast<VertexAttributeArray&&>(value));
+    impl->indexes = std::move(indexes);
+    impl->segments = std::move(drawSegs);
 }
 
 const gfx::UniformBufferArray& Drawable::getUniformBuffers() const {
@@ -342,8 +382,8 @@ gfx::UniformBufferArray& Drawable::mutableUniformBuffers() {
     return impl->uniformBuffers;
 }
 
-void Drawable::setVertexAttrNameId(const StringIdentity value) {
-    impl->idVertexAttrName = value;
+void Drawable::setVertexAttrId(const size_t id) {
+    impl->vertexAttrId = id;
 }
 
 void Drawable::bindAttributes(RenderPass& renderPass) const noexcept {
@@ -356,58 +396,50 @@ void Drawable::bindAttributes(RenderPass& renderPass) const noexcept {
         if (buffer && buffer->get()) {
             assert(binding->vertexStride * impl->vertexCount <= getBufferSize(binding->vertexBufferResource));
             renderPass.bindVertex(buffer->get(), /*offset=*/0, attributeIndex);
-        } else if (impl->noBindingBuffer) {
-            renderPass.bindVertex(impl->noBindingBuffer->get(), /*offset=*/0, attributeIndex);
         }
         attributeIndex += 1;
     }
 }
 
-void Drawable::bindUniformBuffers(RenderPass& renderPass) const noexcept {
-    if (shader) {
-        const auto& shaderMTL = static_cast<const ShaderProgram&>(*shader);
-        for (const auto& element : shaderMTL.getUniformBlocks().getMap()) {
-            const auto& uniformBuffer = getUniformBuffers().get(element.first);
-            assert(uniformBuffer && "UBO missing, drawable skipped");
-            if (uniformBuffer) {
-                const auto& buffer = static_cast<UniformBuffer&>(*uniformBuffer.get());
-                const auto& resource = buffer.getBufferResource();
-                const auto& block = static_cast<const UniformBlock&>(*element.second);
-                const auto index = block.getIndex();
+void Drawable::bindInstanceAttributes(RenderPass& renderPass) const noexcept {
+    const auto& encoder = renderPass.getMetalEncoder();
 
-                if (block.getBindVertex()) {
-                    renderPass.bindVertex(resource, /*offset=*/0, index);
-                }
-                if (block.getBindFragment()) {
-                    renderPass.bindFragment(resource, /*offset=*/0, index);
-                }
+    NS::UInteger attributeIndex = 0;
+    for (const auto& binding : impl->instanceBindings) {
+        if (binding.has_value()) {
+            const auto* buffer = static_cast<const mtl::VertexBufferResource*>(binding->vertexBufferResource);
+            if (buffer && buffer->get()) {
+                renderPass.bindVertex(buffer->get(), /*offset=*/0, attributeIndex);
+            }
+        }
+        attributeIndex += 1;
+    }
+}
+
+void Drawable::bindTextures(RenderPass& renderPass) const noexcept {
+    for (size_t id = 0; id < textures.size(); id++) {
+        if (const auto& texture = textures[id]) {
+            if (const auto& location = shader->getSamplerLocation(id)) {
+                static_cast<mtl::Texture2D&>(*texture).bind(renderPass, static_cast<int32_t>(*location));
             }
         }
     }
 }
 
-void Drawable::bindTextures(RenderPass& renderPass) const noexcept {
-    for (const auto& pair : textures) {
-        if (const auto& tex = pair.second) {
-            const auto& location = pair.first;
-            static_cast<mtl::Texture2D&>(*tex).bind(renderPass, location);
-        }
-    }
-}
-
 void Drawable::unbindTextures(RenderPass& renderPass) const noexcept {
-    for (const auto& pair : textures) {
-        if (const auto& tex = pair.second) {
-            const auto& location = pair.first;
-            static_cast<mtl::Texture2D&>(*tex).unbind(renderPass, location);
+    for (size_t id = 0; id < textures.size(); id++) {
+        if (const auto& texture = textures[id]) {
+            if (const auto& location = shader->getSamplerLocation(id)) {
+                static_cast<mtl::Texture2D&>(*texture).unbind(renderPass, static_cast<int32_t>(*location));
+            }
         }
     }
 }
 
 void Drawable::uploadTextures(UploadPass&) const noexcept {
-    for (const auto& pair : textures) {
-        if (const auto& tex = pair.second) {
-            static_cast<mtl::Texture2D&>(*tex).upload();
+    for (const auto& texture : textures) {
+        if (texture) {
+            texture->upload();
         }
     }
 }
@@ -480,13 +512,15 @@ MTL::VertexFormat mtlVertexTypeOf(gfx::AttributeDataType type) noexcept {
 } // namespace
 
 void Drawable::upload(gfx::UploadPass& uploadPass_) {
+    if (isCustom) {
+        return;
+    }
     if (!shader) {
         Log::Warning(Event::General, "Missing shader for drawable " + util::toString(getID()) + "/" + getName());
         assert(false);
         return;
     }
     const auto& shaderMTL = static_cast<const ShaderProgram&>(*shader);
-    const auto& shaderUniforms = shaderMTL.getUniformBlocks();
 
     auto& uploadPass = static_cast<UploadPass&>(uploadPass_);
     auto& contextBase = uploadPass.getContext();
@@ -500,7 +534,7 @@ void Drawable::upload(gfx::UploadPass& uploadPass_) {
         return;
     }
 
-    if (impl->indexes->getDirty()) {
+    if (!impl->indexes->getBuffer() || impl->indexes->getDirty()) {
         // Create or update a buffer for the index data.  We don't update any
         // existing buffer because it may still be in use by the previous frame.
         auto indexBufferResource{uploadPass.createIndexBufferResource(
@@ -513,12 +547,17 @@ void Drawable::upload(gfx::UploadPass& uploadPass_) {
         impl->indexes->setDirty(false);
     }
 
-    const bool buildAttribs = impl->vertexAttributes.isDirty() || !impl->vertexDesc;
+    const bool buildAttribs = !impl->vertexDesc || !vertexAttributes || !attributeUpdateTime ||
+                              vertexAttributes->isModifiedAfter(*attributeUpdateTime);
 
     if (buildAttribs) {
 #if !defined(NDEBUG)
         const auto debugGroup = uploadPass.createDebugGroup(debugLabel(*this));
 #endif
+
+        if (!vertexAttributes) {
+            vertexAttributes = std::make_shared<VertexAttributeArray>();
+        }
 
         // Apply drawable values to shader defaults
         std::vector<std::unique_ptr<gfx::VertexBufferResource>> vertexBuffers;
@@ -527,16 +566,18 @@ void Drawable::upload(gfx::UploadPass& uploadPass_) {
                                                                     /*vertexAttributeIndex=*/-1,
                                                                     /*vertexData=*/{},
                                                                     shader->getVertexAttributes(),
-                                                                    impl->vertexAttributes,
+                                                                    *vertexAttributes,
                                                                     usage,
+                                                                    attributeUpdateTime,
                                                                     vertexBuffers);
-        impl->attributeBuffers = std::move(vertexBuffers);
 
-        impl->vertexAttributes.visitAttributes(
-            [](const auto&, gfx::VertexAttribute& attrib) { attrib.setDirty(false); });
+        vertexAttributes->visitAttributes([](gfx::VertexAttribute& attrib) { attrib.setDirty(false); });
 
         if (impl->attributeBindings != attributeBindings_) {
             impl->attributeBindings = std::move(attributeBindings_);
+
+            // hash
+            std::size_t hash{0};
 
             // Create a layout descriptor for each attribute
             auto vertDesc = NS::RetainPtr(MTL::VertexDescriptor::vertexDescriptor());
@@ -545,6 +586,7 @@ void Drawable::upload(gfx::UploadPass& uploadPass_) {
             for (auto& binding : impl->attributeBindings) {
                 if (!binding) {
                     assert("Missing attribute binding");
+                    index += 1;
                     continue;
                 }
 
@@ -569,20 +611,55 @@ void Drawable::upload(gfx::UploadPass& uploadPass_) {
                 vertDesc->attributes()->setObject(attribDesc.get(), index);
                 vertDesc->layouts()->setObject(layoutDesc.get(), index);
 
+                mbgl::util::hash_combine(hash,
+                                         mbgl::util::hash(index,
+                                                          binding->attribute.offset,
+                                                          binding->attribute.dataType,
+                                                          binding->vertexStride,
+                                                          static_cast<bool>(binding->vertexBufferResource)));
+
                 index += 1;
             }
 
             impl->vertexDesc = std::move(vertDesc);
+            impl->vertexDescHash = hash;
             impl->pipelineState.reset();
         }
     }
 
+    // build instance buffer
+    const bool buildInstanceBuffer =
+        (instanceAttributes && (!attributeUpdateTime || instanceAttributes->isModifiedAfter(*attributeUpdateTime)));
+
+    if (buildInstanceBuffer) {
+        // Build instance attribute buffers
+        std::vector<std::unique_ptr<gfx::VertexBufferResource>> instanceBuffers;
+        auto instanceBindings_ = uploadPass.buildAttributeBindings(instanceAttributes->getMaxCount(),
+                                                                   /*vertexType*/ gfx::AttributeDataType::Byte,
+                                                                   /*vertexAttributeIndex=*/-1,
+                                                                   /*vertexData=*/{},
+                                                                   shader->getInstanceAttributes(),
+                                                                   *instanceAttributes,
+                                                                   usage,
+                                                                   attributeUpdateTime,
+                                                                   instanceBuffers);
+
+        // clear dirty flag
+        instanceAttributes->visitAttributes([](gfx::VertexAttribute& attrib) { attrib.setDirty(false); });
+
+        if (impl->instanceBindings != instanceBindings_) {
+            impl->instanceBindings = std::move(instanceBindings_);
+        }
+    }
+
     const bool texturesNeedUpload = std::any_of(
-        textures.begin(), textures.end(), [](const auto& pair) { return pair.second && pair.second->needsUpload(); });
+        textures.begin(), textures.end(), [](const auto& texture) { return texture && texture->needsUpload(); });
 
     if (texturesNeedUpload) {
         uploadTextures(uploadPass);
     }
+
+    attributeUpdateTime = util::MonotonicTimer::now();
 }
 
 } // namespace mtl

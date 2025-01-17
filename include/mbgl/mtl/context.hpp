@@ -9,6 +9,7 @@
 #include <mbgl/gfx/context.hpp>
 #include <mbgl/mtl/buffer_resource.hpp>
 #include <mbgl/mtl/mtl_fwd.hpp>
+#include <mbgl/mtl/uniform_buffer.hpp>
 #include <mbgl/util/noncopyable.hpp>
 #include <mbgl/util/containers.hpp>
 
@@ -21,6 +22,11 @@ namespace mbgl {
 
 class ProgramParameters;
 class RenderStaticData;
+
+namespace gfx {
+class VertexAttributeArray;
+using VertexAttributeArrayPtr = std::shared_ptr<VertexAttributeArray>;
+} // namespace gfx
 
 namespace shaders {
 struct ClipUBO;
@@ -45,6 +51,9 @@ public:
 
     const RendererBackend& getBackend() const { return backend; }
 
+    void beginFrame() override;
+    void endFrame() override;
+
     std::unique_ptr<gfx::CommandEncoder> createCommandEncoder() override;
 
     /// Create a new buffer object
@@ -57,7 +66,8 @@ public:
     BufferResource createBuffer(
         const void* data, std::size_t size, gfx::BufferUsageType usage, bool isIndexBuffer, bool persistent) const;
 
-    UniqueShaderProgram createProgram(std::string name,
+    UniqueShaderProgram createProgram(shaders::BuiltIn shaderID,
+                                      std::string name,
                                       std::string_view source,
                                       std::string_view vertexName,
                                       std::string_view fragmentName,
@@ -73,7 +83,10 @@ public:
     void reduceMemoryUsage() override {}
 
     gfx::UniqueDrawableBuilder createDrawableBuilder(std::string name) override;
-    gfx::UniformBufferPtr createUniformBuffer(const void* data, std::size_t size, bool persistent) override;
+    gfx::UniformBufferPtr createUniformBuffer(const void* data,
+                                              std::size_t size,
+                                              bool persistent = false,
+                                              bool ssbo = false) override;
 
     gfx::ShaderProgramBasePtr getGenericShader(gfx::ShaderRegistry&, const std::string& name) override;
 
@@ -84,8 +97,6 @@ public:
     gfx::Texture2DPtr createTexture2D() override;
 
     RenderTargetPtr createRenderTarget(const Size size, const gfx::TextureChannelDataType type) override;
-
-    // UniqueFramebuffer createFramebuffer(const gfx::Texture2D& color);
 
     void resetState(gfx::DepthMode depthMode, gfx::ColorMode colorMode) override;
 
@@ -104,6 +115,8 @@ public:
 
     std::unique_ptr<gfx::DrawScopeResource> createDrawScopeResource() override;
 
+    gfx::VertexAttributeArrayPtr createVertexAttributeArray() const override;
+
 #if !defined(NDEBUG)
     void visualizeStencilBuffer() override;
     void visualizeDepthBuffer(float depthRangeSize) override;
@@ -118,7 +131,7 @@ public:
     virtual bool emplaceOrUpdateUniformBuffer(gfx::UniformBufferPtr&,
                                               const void* data,
                                               std::size_t size,
-                                              bool persistent);
+                                              bool persistent) override;
 
     /// Get a reusable buffer containing the standard fixed tile vertices (+/- `util::EXTENT`)
     const BufferResource& getTileVertexBuffer();
@@ -133,10 +146,23 @@ public:
                                  RenderStaticData& staticData,
                                  const std::vector<shaders::ClipUBO>& tileUBOs);
 
+    /// Get the global uniform buffers
+    const gfx::UniformBufferArray& getGlobalUniformBuffers() const override { return globalUniformBuffers; };
+
+    /// Get the mutable global uniform buffer array
+    gfx::UniformBufferArray& mutableGlobalUniformBuffers() override { return globalUniformBuffers; };
+
+    /// Bind the global uniform buffers
+    void bindGlobalUniformBuffers(gfx::RenderPass&) const noexcept override;
+
+    /// Unbind the global uniform buffers
+    void unbindGlobalUniformBuffers(gfx::RenderPass&) const noexcept override {}
+
 private:
     RendererBackend& backend;
     bool cleanupOnDestruction = true;
 
+    std::optional<BufferResource> emptyBuffer;
     std::optional<BufferResource> tileVertexBuffer;
     std::optional<BufferResource> tileIndexBuffer;
 
@@ -148,6 +174,8 @@ private:
     std::optional<BufferResource> clipMaskUniformsBuffer;
     bool clipMaskUniformsBufferUsed = false;
     const gfx::Renderable* stencilStateRenderable = nullptr;
+
+    UniformBufferArray globalUniformBuffers;
 };
 
 } // namespace mtl

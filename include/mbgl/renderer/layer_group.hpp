@@ -72,7 +72,7 @@ public:
     int32_t getLayerIndex() const { return layerIndex; }
 
     /// Update the layer index to a new value
-    void updateLayerIndex(int32_t value) { layerIndex = value; }
+    virtual void updateLayerIndex(int32_t value) { layerIndex = value; }
 
     /// Get the number of drawables contained
     virtual std::size_t getDrawableCount() const = 0;
@@ -100,6 +100,12 @@ public:
     void addLayerTweaker(const LayerTweakerPtr& tweaker) { layerTweakers.emplace_back(tweaker); }
 
     void runTweakers(const RenderTree&, PaintParameters&);
+
+    /// Get the uniform buffers attached to this layer group
+    virtual const gfx::UniformBufferArray& getUniformBuffers() const = 0;
+
+    /// Get the mutable uniform buffer array attached to this layer group
+    virtual gfx::UniformBufferArray& mutableUniformBuffers() = 0;
 
 protected:
     const Type type;
@@ -162,6 +168,8 @@ public:
     std::size_t clearDrawables() override;
 
     void setStencilTiles(RenderTiles);
+
+    void updateLayerIndex(int32_t value) override { layerIndex = value; }
 
 protected:
     // When stencil clipping is enabled for the layer, this is the set
@@ -231,6 +239,8 @@ public:
     }
 
     std::size_t clearDrawables() override;
+
+    void updateLayerIndex(int32_t value) override { layerIndex = value; }
 
 protected:
     using DrawableCollection = std::set<gfx::UniqueDrawable, gfx::DrawableLessByPriority>;

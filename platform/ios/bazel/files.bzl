@@ -11,29 +11,26 @@ MLN_IOS_SDK_HEADERS = [
     "src/MLNUserLocation.h",
     "src/MLNUserLocationAnnotationView.h",
     "src/MLNUserLocationAnnotationViewStyle.h",
+    "src/MLNScaleBar.h",
 ]
 
 MLN_IOS_PUBLIC_HEADERS = [
-    "src/MLNAnnotationContainerView.h",
-    "src/MLNCompactCalloutView.h",
-    "src/MLNFaux3DUserLocationAnnotationView.h",
-    "src/MLNMapAccessibilityElement.h",
-    "src/MLNMapView+Impl.h",
-    "src/MLNMapView+Metal.h",
-    "src/MLNMapView+OpenGL.h",
-    "src/MLNScaleBar.h",
-    "src/MLNUserLocationHeadingArrowLayer.h",
-    "src/MLNUserLocationHeadingBeamLayer.h",
-    "src/MLNUserLocationHeadingIndicator.h",
-    "src/NSOrthography+MLNAdditions.h",
-    "src/UIColor+MLNAdditions.h",
-    "src/UIDevice+MLNAdditions.h",
-    "src/UIImage+MLNAdditions.h",
-    "src/UIView+MLNAdditions.h",
-    "src/UIViewController+MLNAdditions.h",
+    "src/Mapbox.h",
 ]
 
 MLN_IOS_PRIVATE_HEADERS = [
+    "src/NSOrthography+MLNAdditions.h",
+    "src/UIDevice+MLNAdditions.h",
+    "src/UIImage+MLNAdditions.h",
+    "src/MLNUserLocationHeadingArrowLayer.h",
+    "src/MLNUserLocationHeadingIndicator.h",
+    "src/UIColor+MLNAdditions.h",
+    "src/MLNMapAccessibilityElement.h",
+    "src/UIViewController+MLNAdditions.h",
+    "src/UIView+MLNAdditions.h",
+    "src/MLNFaux3DUserLocationAnnotationView.h",
+    "src/MLNUserLocationHeadingBeamLayer.h",
+    "src/MLNAnnotationContainerView.h",
     "src/MLNAnnotationContainerView_Private.h",
     "src/MLNAnnotationImage_Private.h",
     "src/MLNAnnotationView_Private.h",
@@ -41,6 +38,10 @@ MLN_IOS_PRIVATE_HEADERS = [
     "src/MLNMapView_Private.h",
     "src/MLNUserLocationAnnotationView_Private.h",
     "src/MLNUserLocation_Private.h",
+    "src/MLNCompactCalloutView.h",
+    "src/MLNMapView+Impl.h",
+    "src/MLNMapView+Metal.h",
+    "src/MLNMapView+OpenGL.h",
 ]
 
 MLN_IOS_PUBLIC_OBJC_SOURCE = [
@@ -91,7 +92,7 @@ MLN_PUBLIC_IOS_APP_SOPURCE = [
     "app/MBXState.m",
     "app/MBXStateManager.m",
     "app/MBXUserLocationAnnotationView.m",
-    "app/MBXViewController.m",
+    "app/MBXViewController.mm",
     "app/main.m",
     "app/MBXAnnotationView.h",
     "app/MBXAppDelegate.h",

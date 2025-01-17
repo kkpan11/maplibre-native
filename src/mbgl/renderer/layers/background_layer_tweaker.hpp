@@ -28,7 +28,9 @@ public:
     void execute(LayerGroupBase&, const PaintParameters&) override;
 
 protected:
-    gfx::UniformBufferPtr backgroundLayerBuffer;
+#if MLN_UBO_CONSOLIDATION
+    gfx::UniformBufferPtr drawableUniformBuffer;
+#endif
 };
 
 } // namespace mbgl

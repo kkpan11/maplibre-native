@@ -1,3 +1,4 @@
+#if MLN_RENDER_BACKEND_OPENGL
 #include <mbgl/test/util.hpp>
 
 #include <mbgl/gl/renderer_backend.hpp>
@@ -54,7 +55,9 @@ TEST(BackendScope, SingleScope) {
         deactivated = true;
     };
 
-    { gfx::BackendScope test{backend}; }
+    {
+        gfx::BackendScope test{backend};
+    }
 
     ASSERT_TRUE(activated);
     ASSERT_TRUE(deactivated);
@@ -126,3 +129,4 @@ TEST(BackendScope, ChainedScopes) {
     ASSERT_FALSE(activatedA);
     ASSERT_FALSE(activatedB);
 }
+#endif

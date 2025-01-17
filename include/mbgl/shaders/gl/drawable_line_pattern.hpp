@@ -23,35 +23,21 @@ struct ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::OpenGL> {
 layout (location = 0) in vec2 a_pos_normal;
 layout (location = 1) in vec4 a_data;
 
-layout (std140) uniform LinePatternUBO {
-    highp mat4 u_matrix;
-    mediump vec4 u_scale;
-    highp vec2 u_texsize;
+layout (std140) uniform GlobalPaintParamsUBO {
+    highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
+    highp vec2 u_world_size;
+    highp float u_camera_to_center_distance;
+    highp float u_symbol_fade_change;
+    highp float u_aspect_ratio;
+    highp float u_pixel_ratio;
+    highp float u_map_zoom;
+    lowp float global_pad1;
+};
+layout (std140) uniform LinePatternDrawableUBO {
+    highp mat4 u_matrix;
     mediump float u_ratio;
-    lowp float u_device_pixel_ratio;
-    highp float u_fade;
-
-    highp float pad1;
-};
-
-layout (std140) uniform LinePatternPropertiesUBO {
-    lowp float u_blur;
-    lowp float u_opacity;
-    lowp float u_offset;
-    mediump float u_gapwidth;
-    mediump float u_width;
-
-    highp float pad2;
-    highp vec2 pad3;
-};
-
-layout (std140) uniform LinePatternTilePropertiesUBO {
-    lowp vec4 u_pattern_from;
-    lowp vec4 u_pattern_to;
-};
-
-layout (std140) uniform LinePatternInterpolationUBO {
+    // Interpolations
     lowp float u_blur_t;
     lowp float u_opacity_t;
     lowp float u_offset_t;
@@ -59,8 +45,27 @@ layout (std140) uniform LinePatternInterpolationUBO {
     lowp float u_width_t;
     lowp float u_pattern_from_t;
     lowp float u_pattern_to_t;
+};
 
-    highp float pad4;
+layout (std140) uniform LinePatternTilePropsUBO {
+    lowp vec4 u_pattern_from;
+    lowp vec4 u_pattern_to;
+    mediump vec4 u_scale;
+    highp vec2 u_texsize;
+    highp float u_fade;
+    lowp float tileprops_pad1;
+};
+
+layout (std140) uniform LineEvaluatedPropsUBO {
+    highp vec4 u_color;
+    lowp float u_blur;
+    lowp float u_opacity;
+    mediump float u_gapwidth;
+    lowp float u_offset;
+    mediump float u_width;
+    lowp float u_floorwidth;
+    lowp float props_pad1;
+    lowp float props_pad2;
 };
 
 out vec2 v_normal;
@@ -133,7 +138,7 @@ mediump vec4 pattern_to = u_pattern_to;
 
     // the distance over which the line edge fades out.
     // Retina devices need a smaller distance to avoid aliasing.
-    float ANTIALIASING = 1.0 / u_device_pixel_ratio / 2.0;
+    float ANTIALIASING = 1.0 / DEVICE_PIXEL_RATIO / 2.0;
 
     vec2 a_extrude = a_data.xy - 128.0;
     float a_direction = mod(a_data.z, 4.0) - 1.0;
@@ -181,44 +186,25 @@ mediump vec4 pattern_to = u_pattern_to;
     v_width2 = vec2(outset, inset);
 }
 )";
-    static constexpr const char* fragment = R"(layout (std140) uniform LinePatternUBO {
-    highp mat4 u_matrix;
-    mediump vec4 u_scale;
-    highp vec2 u_texsize;
-    highp vec2 u_units_to_pixels;
-    mediump float u_ratio;
-    lowp float u_device_pixel_ratio;
-    highp float u_fade;
-
-    highp float pad1;
-};
-
-layout (std140) uniform LinePatternPropertiesUBO {
-    lowp float u_blur;
-    lowp float u_opacity;
-    lowp float u_offset;
-    mediump float u_gapwidth;
-    mediump float u_width;
-
-    highp float pad2;
-    highp vec2 pad3;
-};
-
-layout (std140) uniform LinePatternTilePropertiesUBO {
+    static constexpr const char* fragment = R"(layout (std140) uniform LinePatternTilePropsUBO {
     lowp vec4 u_pattern_from;
     lowp vec4 u_pattern_to;
+    mediump vec4 u_scale;
+    highp vec2 u_texsize;
+    highp float u_fade;
+    lowp float tileprops_pad1;
 };
 
-layout (std140) uniform LinePatternInterpolationUBO {
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_offset_t;
-    lowp float u_gapwidth_t;
-    lowp float u_width_t;
-    lowp float u_pattern_from_t;
-    lowp float u_pattern_to_t;
-
-    highp float pad4;
+layout (std140) uniform LineEvaluatedPropsUBO {
+    highp vec4 u_color;
+    lowp float u_blur;
+    lowp float u_opacity;
+    mediump float u_gapwidth;
+    lowp float u_offset;
+    mediump float u_width;
+    lowp float u_floorwidth;
+    lowp float props_pad1;
+    lowp float props_pad2;
 };
 
 uniform sampler2D u_image;
@@ -278,7 +264,7 @@ lowp float opacity = u_opacity;
     // Calculate the antialiasing fade factor. This is either when fading in
     // the line in case of an offset line (v_width2.t) or when fading out
     // (v_width2.s)
-    float blur2 = (blur + 1.0 / u_device_pixel_ratio) * v_gamma_scale;
+    float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * v_gamma_scale;
     float alpha = clamp(min(dist - (v_width2.t - blur2), v_width2.s - dist) / blur2, 0.0, 1.0);
 
     float x_a = mod(v_linesofar / pattern_size_a.x, 1.0);

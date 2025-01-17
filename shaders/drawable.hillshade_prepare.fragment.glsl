@@ -5,16 +5,11 @@ precision highp float;
 in vec2 v_pos;
 uniform sampler2D u_image;
 
-layout (std140) uniform HillshadePrepareDrawableUBO {
-    highp mat4 u_matrix;
+layout (std140) uniform HillshadePrepareTilePropsUBO {
     highp vec4 u_unpack;
     highp vec2 u_dimension;
     highp float u_zoom;
     highp float u_maxzoom;
-    lowp float pad0_;
-    lowp float pad1_;
-    lowp float pad2_;
-    lowp float pad3_;
 };
 
 float getElevation(vec2 coord, float bias) {

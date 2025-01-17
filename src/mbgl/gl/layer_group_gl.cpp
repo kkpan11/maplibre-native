@@ -9,14 +9,20 @@
 #include <mbgl/renderer/paint_parameters.hpp>
 #include <mbgl/shaders/gl/shader_program_gl.hpp>
 #include <mbgl/util/convert.hpp>
+#include <mbgl/util/instrumentation.hpp>
 
 namespace mbgl {
 namespace gl {
+
+using namespace platform;
 
 TileLayerGroupGL::TileLayerGroupGL(int32_t layerIndex_, std::size_t initialCapacity, std::string name_)
     : TileLayerGroup(layerIndex_, initialCapacity, std::move(name_)) {}
 
 void TileLayerGroupGL::upload(gfx::UploadPass& uploadPass) {
+    MLN_TRACE_FUNC();
+    MLN_ZONE_STR(name);
+
     if (!enabled) {
         return;
     }
@@ -46,6 +52,8 @@ void TileLayerGroupGL::render(RenderOrchestrator&, PaintParameters& parameters) 
         return;
     }
 
+    MLN_TRACE_FUNC();
+
     auto& context = static_cast<gl::Context&>(parameters.context);
 
     // `stencilModeFor3D` uses a different stencil mask value each time its called, so if the
@@ -57,6 +65,7 @@ void TileLayerGroupGL::render(RenderOrchestrator&, PaintParameters& parameters) 
     gfx::StencilMode stencilMode3d;
 
     if (getDrawableCount()) {
+        MLN_TRACE_ZONE(clip masks);
 #if !defined(NDEBUG)
         const auto label_clip = getName() + (getName().empty() ? "" : "-") + "tile-clip-masks";
         const auto debugGroupClip = parameters.encoder->createDebugGroup(label_clip.c_str());
@@ -90,6 +99,7 @@ void TileLayerGroupGL::render(RenderOrchestrator&, PaintParameters& parameters) 
     const auto debugGroupRender = parameters.encoder->createDebugGroup(label_render.c_str());
 #endif
 
+    bool bindUBOs = false;
     visitDrawables([&](gfx::Drawable& drawable) {
         if (!drawable.getEnabled() || !drawable.hasRenderPass(parameters.pass)) {
             return;
@@ -116,8 +126,17 @@ void TileLayerGroupGL::render(RenderOrchestrator&, PaintParameters& parameters) 
             context.setStencilMode(drawable.getEnableStencil() ? stencilMode3d : gfx::StencilMode::disabled());
         }
 
+        if (!bindUBOs) {
+            uniformBuffers.bind();
+            bindUBOs = true;
+        }
+
         drawable.draw(parameters);
     });
+
+    if (bindUBOs) {
+        uniformBuffers.unbind();
+    }
 }
 
 LayerGroupGL::LayerGroupGL(int32_t layerIndex_, std::size_t initialCapacity, std::string name_)
@@ -148,6 +167,7 @@ void LayerGroupGL::render(RenderOrchestrator&, PaintParameters& parameters) {
         return;
     }
 
+    bool bindUBOs = false;
     visitDrawables([&](gfx::Drawable& drawable) {
         if (!drawable.getEnabled() || !drawable.hasRenderPass(parameters.pass)) {
             return;
@@ -161,8 +181,17 @@ void LayerGroupGL::render(RenderOrchestrator&, PaintParameters& parameters) {
             tweaker->execute(drawable, parameters);
         }
 
+        if (!bindUBOs) {
+            uniformBuffers.bind();
+            bindUBOs = true;
+        }
+
         drawable.draw(parameters);
     });
+
+    if (bindUBOs) {
+        uniformBuffers.unbind();
+    }
 }
 
 } // namespace gl

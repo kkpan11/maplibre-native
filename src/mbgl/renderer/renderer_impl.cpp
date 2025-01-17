@@ -9,6 +9,7 @@
 #include <mbgl/gfx/renderable.hpp>
 #include <mbgl/gfx/upload_pass.hpp>
 #include <mbgl/programs/programs.hpp>
+#include <mbgl/renderer/paint_parameters.hpp>
 #include <mbgl/renderer/pattern_atlas.hpp>
 #include <mbgl/renderer/renderer_observer.hpp>
 #include <mbgl/renderer/render_static_data.hpp>
@@ -16,6 +17,7 @@
 #include <mbgl/util/convert.hpp>
 #include <mbgl/util/string.hpp>
 #include <mbgl/util/logging.hpp>
+#include <mbgl/util/instrumentation.hpp>
 
 #if MLN_DRAWABLE_RENDERER
 #include <mbgl/gfx/drawable_tweaker.hpp>
@@ -25,7 +27,16 @@
 #include <limits>
 #endif // MLN_DRAWABLE_RENDERER
 
-#if !MLN_RENDER_BACKEND_METAL
+#if MLN_RENDER_BACKEND_METAL
+#include <mbgl/mtl/renderer_backend.hpp>
+#include <Metal/MTLCaptureManager.hpp>
+#include <Metal/MTLCaptureScope.hpp>
+/// Enable programmatic Metal frame captures for specific frame numbers.
+/// Requries iOS 13
+constexpr auto EnableMetalCapture = 0;
+constexpr auto CaptureFrameStart = 0; // frames are 0-based
+constexpr auto CaptureFrameCount = 1;
+#elif MLN_RENDER_BACKEND_OPENGL
 #include <mbgl/gl/defines.hpp>
 #if MLN_DRAWABLE_RENDERER
 #include <mbgl/gl/drawable_gl.hpp>
@@ -48,7 +59,7 @@ RendererObserver& nullObserver() {
 Renderer::Impl::Impl(gfx::RendererBackend& backend_,
                      float pixelRatio_,
                      const std::optional<std::string>& localFontFamily_)
-    : orchestrator(!backend_.contextIsShared(), localFontFamily_),
+    : orchestrator(!backend_.contextIsShared(), backend_.getThreadPool(), localFontFamily_),
       backend(backend_),
       observer(&nullObserver()),
       pixelRatio(pixelRatio_) {}
@@ -57,16 +68,100 @@ Renderer::Impl::~Impl() {
     assert(gfx::BackendScope::exists());
 };
 
+void Renderer::Impl::onPreCompileShader(shaders::BuiltIn shaderID,
+                                        gfx::Backend::Type type,
+                                        const std::string& additionalDefines) {
+    observer->onPreCompileShader(shaderID, type, additionalDefines);
+}
+
+void Renderer::Impl::onPostCompileShader(shaders::BuiltIn shaderID,
+                                         gfx::Backend::Type type,
+                                         const std::string& additionalDefines) {
+    observer->onPostCompileShader(shaderID, type, additionalDefines);
+}
+
+void Renderer::Impl::onShaderCompileFailed(shaders::BuiltIn shaderID,
+                                           gfx::Backend::Type type,
+                                           const std::string& additionalDefines) {
+    observer->onShaderCompileFailed(shaderID, type, additionalDefines);
+}
+
 void Renderer::Impl::setObserver(RendererObserver* observer_) {
     observer = observer_ ? observer_ : &nullObserver();
 }
 
 void Renderer::Impl::render(const RenderTree& renderTree,
                             [[maybe_unused]] const std::shared_ptr<UpdateParameters>& updateParameters) {
+    MLN_TRACE_FUNC();
     auto& context = backend.getContext();
+    context.setObserver(this);
+
+#if MLN_RENDER_BACKEND_METAL
+    if constexpr (EnableMetalCapture) {
+        const auto& mtlBackend = static_cast<mtl::RendererBackend&>(backend);
+
+        const auto& mtlDevice = mtlBackend.getDevice();
+
+        if (!commandCaptureScope) {
+            if (const auto& cmdQueue = mtlBackend.getCommandQueue()) {
+                if (const auto captureManager = NS::RetainPtr(MTL::CaptureManager::sharedCaptureManager())) {
+                    if ((commandCaptureScope = NS::TransferPtr(captureManager->newCaptureScope(cmdQueue.get())))) {
+                        const auto label = "Renderer::Impl frame=" + util::toString(frameCount);
+                        commandCaptureScope->setLabel(NS::String::string(label.c_str(), NS::UTF8StringEncoding));
+                        captureManager->setDefaultCaptureScope(commandCaptureScope.get());
+                    }
+                }
+            }
+        }
+
+        // "When you capture a frame programmatically, you can capture Metal commands that span multiple
+        //  frames by using a custom capture scope. For example, by calling begin() at the start of frame
+        //  1 and end() after frame 3, the trace will contain command data from all the buffers that were
+        //  committed in the three frames."
+        // https://developer.apple.com/documentation/metal/debugging_tools/capturing_gpu_command_data_programmatically
+        if constexpr (0 < CaptureFrameStart && 0 < CaptureFrameCount) {
+            if (commandCaptureScope) {
+                const auto captureManager = NS::RetainPtr(MTL::CaptureManager::sharedCaptureManager());
+                if (frameCount == CaptureFrameStart) {
+                    constexpr auto captureDest = MTL::CaptureDestination::CaptureDestinationDeveloperTools;
+                    if (captureManager && !captureManager->isCapturing() &&
+                        captureManager->supportsDestination(captureDest)) {
+                        if (auto captureDesc = NS::TransferPtr(MTL::CaptureDescriptor::alloc()->init())) {
+                            captureDesc->setCaptureObject(mtlDevice.get());
+                            captureDesc->setDestination(captureDest);
+                            NS::Error* errorPtr = nullptr;
+                            if (captureManager->startCapture(captureDesc.get(), &errorPtr)) {
+                                Log::Warning(Event::Render, "Capture Started");
+                            } else {
+                                std::string errStr = "<none>";
+                                if (auto error = NS::TransferPtr(errorPtr)) {
+                                    if (auto str = error->localizedDescription()) {
+                                        if (auto cstr = str->utf8String()) {
+                                            errStr = cstr;
+                                        }
+                                    }
+                                }
+                                Log::Warning(Event::Render, "Capture Failed: " + errStr);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (commandCaptureScope) {
+            commandCaptureScope->beginScope();
+
+            const auto captureManager = NS::RetainPtr(MTL::CaptureManager::sharedCaptureManager());
+            if (captureManager->isCapturing()) {
+                Log::Info(Event::Render, "Capturing frame " + util::toString(frameCount));
+            }
+        }
+    }
+#endif // MLN_RENDER_BACKEND_METAL
 
     // Blocks execution until the renderable is available.
     backend.getDefaultRenderable().wait();
+    context.beginFrame();
 
     if (!staticData) {
         staticData = std::make_unique<RenderStaticData>(pixelRatio, std::make_unique<gfx::ShaderRegistry>());
@@ -156,12 +251,20 @@ void Renderer::Impl::render(const RenderTree& renderTree,
         const auto debugGroup = uploadPass->createDebugGroup("layerGroup-upload");
 #endif
 
-        // Tweakers are run in the upload pass so they can set up uniforms.
-        orchestrator.visitLayerGroups(
-            [&](LayerGroupBase& layerGroup) { layerGroup.runTweakers(renderTree, parameters); });
-
         // Update the debug layer groups
         orchestrator.updateDebugLayerGroups(renderTree, parameters);
+
+        // Tweakers are run in the upload pass so they can set up uniforms.
+        parameters.currentLayer = 0;
+        orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
+            layerGroup.runTweakers(renderTree, parameters);
+            parameters.currentLayer++;
+        });
+        parameters.currentLayer = 0;
+        orchestrator.visitDebugLayerGroups([&](LayerGroupBase& layerGroup) {
+            layerGroup.runTweakers(renderTree, parameters);
+            parameters.currentLayer++;
+        });
 
         // Give the layers a chance to upload
         orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) { layerGroup.upload(*uploadPass); });
@@ -172,6 +275,22 @@ void Renderer::Impl::render(const RenderTree& renderTree,
         // Upload the Debug layer group
         orchestrator.visitDebugLayerGroups([&](LayerGroupBase& layerGroup) { layerGroup.upload(*uploadPass); });
     }
+
+    const Size atlasSize = parameters.patternAtlas.getPixelSize();
+    const auto& worldSize = parameters.staticData.backendSize;
+    const shaders::GlobalPaintParamsUBO globalPaintParamsUBO = {
+        /* .pattern_atlas_texsize = */ {static_cast<float>(atlasSize.width), static_cast<float>(atlasSize.height)},
+        /* .units_to_pixels = */ {1.0f / parameters.pixelsToGLUnits[0], 1.0f / parameters.pixelsToGLUnits[1]},
+        /* .world_size = */ {static_cast<float>(worldSize.width), static_cast<float>(worldSize.height)},
+        /* .camera_to_center_distance = */ parameters.state.getCameraToCenterDistance(),
+        /* .symbol_fade_change = */ parameters.symbolFadeChange,
+        /* .aspect_ratio = */ parameters.state.getSize().aspectRatio(),
+        /* .pixel_ratio = */ parameters.pixelRatio,
+        /* .map_zoom = */ static_cast<float>(parameters.state.getZoom()),
+        /* .pad1 = */ 0,
+    };
+    auto& globalUniforms = context.mutableGlobalUniformBuffers();
+    globalUniforms.createOrUpdate(shaders::idGlobalPaintParamsUBO, &globalPaintParamsUBO, context);
 #endif
 
     // - 3D PASS
@@ -185,13 +304,14 @@ void Renderer::Impl::render(const RenderTree& renderTree,
             const auto debugGroup(parameters.encoder->createDebugGroup("common-3d"));
             parameters.pass = RenderPass::Pass3D;
 
-            if (!parameters.staticData.depthRenderbuffer ||
-                parameters.staticData.depthRenderbuffer->getSize() != parameters.staticData.backendSize) {
-                parameters.staticData.depthRenderbuffer =
-                    parameters.context.createRenderbuffer<gfx::RenderbufferPixelType::Depth>(
-                        parameters.staticData.backendSize);
-            }
-            parameters.staticData.depthRenderbuffer->setShouldClear(true);
+            // TODO is this needed?
+            // if (!parameters.staticData.depthRenderbuffer ||
+            //    parameters.staticData.depthRenderbuffer->getSize() != parameters.staticData.backendSize) {
+            //    parameters.staticData.depthRenderbuffer =
+            //        parameters.context.createRenderbuffer<gfx::RenderbufferPixelType::Depth>(
+            //            parameters.staticData.backendSize);
+            //}
+            // parameters.staticData.depthRenderbuffer->setShouldClear(true);
         }
     };
 
@@ -201,10 +321,12 @@ void Renderer::Impl::render(const RenderTree& renderTree,
         assert(parameters.pass == RenderPass::Pass3D);
 
         // draw layer groups, 3D pass
-        const auto maxLayerIndex = orchestrator.maxLayerIndex();
+        parameters.currentLayer = static_cast<uint32_t>(orchestrator.numLayerGroups()) - 1;
         orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
             layerGroup.render(orchestrator, parameters);
-            parameters.currentLayer = maxLayerIndex - layerGroup.getLayerIndex();
+            if (parameters.currentLayer > 0) {
+                parameters.currentLayer--;
+            }
         });
     };
 #endif // MLN_DRAWABLE_RENDERER
@@ -254,29 +376,45 @@ void Renderer::Impl::render(const RenderTree& renderTree,
     // Drawables
     const auto drawableOpaquePass = [&] {
         const auto debugGroup(parameters.renderPass->createDebugGroup("drawables-opaque"));
-        const auto maxLayerIndex = orchestrator.maxLayerIndex();
         parameters.pass = RenderPass::Opaque;
-        parameters.currentLayer = 0;
-        parameters.depthRangeSize = 1 - (maxLayerIndex + 3) * parameters.numSublayers * PaintParameters::depthEpsilon;
+        parameters.depthRangeSize = 1 - (orchestrator.numLayerGroups() + 2) * PaintParameters::numSublayers *
+                                            PaintParameters::depthEpsilon;
 
         // draw layer groups, opaque pass
-        orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
-            parameters.currentLayer = layerGroup.getLayerIndex();
+        parameters.currentLayer = 0;
+        orchestrator.visitLayerGroupsReversed([&](LayerGroupBase& layerGroup) {
             layerGroup.render(orchestrator, parameters);
+            parameters.currentLayer++;
         });
     };
 
     const auto drawableTranslucentPass = [&] {
         const auto debugGroup(parameters.renderPass->createDebugGroup("drawables-translucent"));
-        const auto maxLayerIndex = orchestrator.maxLayerIndex();
         parameters.pass = RenderPass::Translucent;
-        parameters.depthRangeSize = 1 - (maxLayerIndex + 3) * parameters.numSublayers * PaintParameters::depthEpsilon;
+        parameters.depthRangeSize = 1 - (orchestrator.numLayerGroups() + 2) * PaintParameters::numSublayers *
+                                            PaintParameters::depthEpsilon;
 
         // draw layer groups, translucent pass
+        parameters.currentLayer = static_cast<uint32_t>(orchestrator.numLayerGroups()) - 1;
         orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) {
-            parameters.currentLayer = maxLayerIndex - layerGroup.getLayerIndex();
             layerGroup.render(orchestrator, parameters);
+            if (parameters.currentLayer > 0) {
+                parameters.currentLayer--;
+            }
         });
+
+        // Finally, render any legacy layers which have not been converted to drawables.
+        // Note that they may be out of order, this is just a temporary fix for `RenderLocationIndicatorLayer` (#2216)
+        parameters.depthRangeSize = 1 - (layerRenderItems.size() + 2) * PaintParameters::numSublayers *
+                                            PaintParameters::depthEpsilon;
+        int32_t i = static_cast<int32_t>(layerRenderItems.size()) - 1;
+        for (auto it = layerRenderItems.begin(); it != layerRenderItems.end() && i >= 0; ++it, --i) {
+            parameters.currentLayer = i;
+            const RenderItem& item = *it;
+            if (item.hasRenderPass(parameters.pass)) {
+                item.render(parameters);
+            }
+        }
     };
 #endif
 
@@ -285,7 +423,7 @@ void Renderer::Impl::render(const RenderTree& renderTree,
     const auto renderLayerOpaquePass = [&] {
         const auto debugGroup(parameters.renderPass->createDebugGroup("opaque"));
         parameters.pass = RenderPass::Opaque;
-        parameters.depthRangeSize = 1 - (layerRenderItems.size() + 2) * parameters.numSublayers *
+        parameters.depthRangeSize = 1 - (layerRenderItems.size() + 2) * PaintParameters::numSublayers *
                                             PaintParameters::depthEpsilon;
 
         uint32_t i = 0;
@@ -303,7 +441,7 @@ void Renderer::Impl::render(const RenderTree& renderTree,
     const auto renderLayerTranslucentPass = [&] {
         const auto debugGroup(parameters.renderPass->createDebugGroup("translucent"));
         parameters.pass = RenderPass::Translucent;
-        parameters.depthRangeSize = 1 - (layerRenderItems.size() + 2) * parameters.numSublayers *
+        parameters.depthRangeSize = 1 - (layerRenderItems.size() + 2) * PaintParameters::numSublayers *
                                             PaintParameters::depthEpsilon;
 
         int32_t i = static_cast<int32_t>(layerRenderItems.size()) - 1;
@@ -323,8 +461,10 @@ void Renderer::Impl::render(const RenderTree& renderTree,
         // Renders debug overlays.
         {
             const auto debugGroup(parameters.renderPass->createDebugGroup("debug"));
+            parameters.currentLayer = 0;
             orchestrator.visitDebugLayerGroups([&](LayerGroupBase& layerGroup) {
-                visitLayerGroupDrawables(layerGroup, [&](gfx::Drawable& drawable) { drawable.draw(parameters); });
+                layerGroup.render(orchestrator, parameters);
+                parameters.currentLayer++;
             });
         }
     };
@@ -364,6 +504,7 @@ void Renderer::Impl::render(const RenderTree& renderTree,
     }
     drawableTargetsPass();
     commonClearPass();
+    context.bindGlobalUniformBuffers(*parameters.renderPass);
     drawableOpaquePass();
     drawableTranslucentPass();
     drawableDebugOverlays();
@@ -383,17 +524,32 @@ void Renderer::Impl::render(const RenderTree& renderTree,
 #if MLN_DRAWABLE_RENDERER
     // Give the layers a chance to do cleanup
     orchestrator.visitLayerGroups([&](LayerGroupBase& layerGroup) { layerGroup.postRender(orchestrator, parameters); });
+    context.unbindGlobalUniformBuffers(*parameters.renderPass);
 #endif
 
     // Ends the RenderPass
     parameters.renderPass.reset();
 
     const auto startRendering = util::MonotonicTimer::now().count();
+    // present submits render commands
     parameters.encoder->present(parameters.backend.getDefaultRenderable());
     const auto renderingTime = util::MonotonicTimer::now().count() - startRendering;
 
-    // CommandEncoder destructor submits render commands.
     parameters.encoder.reset();
+    context.endFrame();
+
+#if MLN_RENDER_BACKEND_METAL
+    if constexpr (EnableMetalCapture) {
+        if (commandCaptureScope) {
+            commandCaptureScope->endScope();
+
+            const auto captureManager = NS::RetainPtr(MTL::CaptureManager::sharedCaptureManager());
+            if (frameCount == CaptureFrameStart + CaptureFrameCount - 1 && captureManager->isCapturing()) {
+                captureManager->stopCapture();
+            }
+        }
+    }
+#endif // MLN_RENDER_BACKEND_METAL
 
     const auto encodingTime = renderTree.getElapsedTime() - renderingTime;
 
@@ -412,6 +568,7 @@ void Renderer::Impl::render(const RenderTree& renderTree,
     }
 
     frameCount += 1;
+    MLN_END_FRAME();
 }
 
 void Renderer::Impl::reduceMemoryUse() {

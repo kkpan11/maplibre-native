@@ -21,7 +21,8 @@ using namespace style;
 
 RenderLayer::RenderLayer(Immutable<style::LayerProperties> properties)
     : evaluatedProperties(std::move(properties)),
-      baseImpl(evaluatedProperties->baseImpl) {}
+      baseImpl(evaluatedProperties->baseImpl),
+      renderTilesOwner(makeMutable<std::vector<RenderTile>>()) {}
 
 void RenderLayer::transition(const TransitionParameters& parameters, Immutable<style::Layer::Impl> newImpl) {
     baseImpl = std::move(newImpl);
@@ -58,6 +59,7 @@ void RenderLayer::prepare(const LayerPrepareParameters& params) {
     assert(params.source);
     assert(params.source->isEnabled());
     renderTiles = params.source->getRenderTiles();
+    renderTilesOwner = params.source->getRawRenderTiles();
     addRenderPassesFromTiles();
 
 #if MLN_DRAWABLE_RENDERER
@@ -70,31 +72,6 @@ std::optional<Color> RenderLayer::getSolidBackground() const {
 }
 
 #if MLN_DRAWABLE_RENDERER
-void RenderLayer::replaceTweaker(LayerTweakerPtr& curTweaker,
-                                 LayerTweakerPtr newTweaker,
-                                 const std::vector<LayerGroupBasePtr>& layerGroups) {
-    const auto prevTweaker = curTweaker;
-
-    // We need to re-create the tweaker because it doesn't yet support modifying evaluated
-    // properties, but we don't want to stop updating drawables (as in the `layerChanged` case)
-    // so we need to update the tweaker reference on the outstanding drawables so that they
-    // pass the check in `updateExisting`.
-    // TODO: Once the tweaker doesn't need to be re-created on each property evaluation, this won't be needed.
-    for (const auto& group : layerGroups) {
-        if (group) {
-            group->addLayerTweaker(newTweaker);
-
-            visitLayerGroupDrawables(*group, [&](gfx::Drawable& drawable) {
-                if (drawable.getLayerTweaker() == prevTweaker) {
-                    drawable.setLayerTweaker(newTweaker);
-                }
-            });
-        }
-    }
-
-    curTweaker = std::move(newTweaker);
-}
-
 void RenderLayer::layerChanged(const TransitionParameters&,
                                const Immutable<style::Layer::Impl>&,
                                UniqueChangeRequestVec&) {

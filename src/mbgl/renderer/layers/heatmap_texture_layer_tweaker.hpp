@@ -16,8 +16,6 @@ public:
     ~HeatmapTextureLayerTweaker() override = default;
 
     void execute(LayerGroupBase&, const PaintParameters&) override;
-
-protected:
 };
 
 } // namespace mbgl

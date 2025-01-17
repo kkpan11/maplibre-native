@@ -3,10 +3,11 @@
 // Forward-declarations for metal-cpp types, allowing
 // references without including any third-party headers
 
-#include <memory>
+#include <cstdint>
 
 namespace CA {
 class MetalDrawable;
+class MetalLayer;
 } // namespace CA
 
 namespace NS {
@@ -19,6 +20,7 @@ namespace MTL {
 class BlitCommandEncoder;
 class BlitPassDescriptor;
 class Buffer;
+class CaptureScope;
 class CommandBuffer;
 class CommandQueue;
 class Device;
@@ -38,11 +40,14 @@ class VertexDescriptor;
 
 namespace mbgl {
 namespace mtl {
+
 using CAMetalDrawablePtr = NS::SharedPtr<CA::MetalDrawable>;
+using CAMetalLayerPtr = NS::SharedPtr<CA::MetalLayer>;
 
 using MTLBlitCommandEncoderPtr = NS::SharedPtr<MTL::BlitCommandEncoder>;
 using MTLBlitPassDescriptorPtr = NS::SharedPtr<MTL::BlitPassDescriptor>;
 using MTLBufferPtr = NS::SharedPtr<MTL::Buffer>;
+using MTLCaptureScopePtr = NS::SharedPtr<MTL::CaptureScope>;
 using MTLCommandBufferPtr = NS::SharedPtr<MTL::CommandBuffer>;
 using MTLCommandQueuePtr = NS::SharedPtr<MTL::CommandQueue>;
 using MTLDevicePtr = NS::SharedPtr<MTL::Device>;

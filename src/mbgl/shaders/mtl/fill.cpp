@@ -1,82 +1,74 @@
 #include <mbgl/shaders/mtl/fill.hpp>
+#include <mbgl/shaders/shader_defines.hpp>
 
 namespace mbgl {
 namespace shaders {
 
-const std::array<AttributeInfo, 4> ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Metal>::attributes = {
-    AttributeInfo{0, gfx::AttributeDataType::Short2, 1, "a_pos"},
-    AttributeInfo{1, gfx::AttributeDataType::Float4, 1, "a_color"},
-    AttributeInfo{2, gfx::AttributeDataType::Float2, 1, "a_opacity"},
+//
+// Fill
 
-    // This shader doesn't use it, but we need this so that the layer can assign the same
-    // attributes to all the drawables.  If/When `VertexAttributeArray::resolve` allows it,
-    // this can be removed.
-    AttributeInfo{8, gfx::AttributeDataType::Float2, 1, "a_outline_color"},
-};
-const std::array<UniformBlockInfo, 5> ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Metal>::uniforms = {
-    UniformBlockInfo{3, true, false, sizeof(FillDrawableUBO), "FillDrawableUBO"},
-    UniformBlockInfo{4, true, true, sizeof(FillEvaluatedPropsUBO), "FillEvaluatedPropsUBO"},
-    UniformBlockInfo{5, true, false, sizeof(FillInterpolateUBO), "FillInterpolateUBO"},
-    UniformBlockInfo{6, true, true, sizeof(FillPermutationUBO), "FillPermutationUBO"},
-    UniformBlockInfo{7, true, false, sizeof(ExpressionInputsUBO), "ExpressionInputsUBO"},
-};
-const std::array<TextureInfo, 0> ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Metal>::textures = {};
+using FillShaderSource = ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Metal>;
 
-const std::array<AttributeInfo, 4> ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Metal>::attributes = {
-    AttributeInfo{0, gfx::AttributeDataType::Short2, 1, "a_pos"},
-    AttributeInfo{1, gfx::AttributeDataType::Float4, 1, "a_outline_color"},
-    AttributeInfo{2, gfx::AttributeDataType::Float2, 1, "a_opacity"},
+const std::array<AttributeInfo, 3> FillShaderSource::attributes = {
+    AttributeInfo{fillUBOCount + 0, gfx::AttributeDataType::Short2, idFillPosVertexAttribute},
+    AttributeInfo{fillUBOCount + 1, gfx::AttributeDataType::Float4, idFillColorVertexAttribute},
+    AttributeInfo{fillUBOCount + 2, gfx::AttributeDataType::Float2, idFillOpacityVertexAttribute},
+};
+const std::array<TextureInfo, 0> FillShaderSource::textures = {};
 
-    // See `a_outline_color` in FillShader
-    AttributeInfo{8, gfx::AttributeDataType::Float2, 1, "a_color"},
-};
-const std::array<UniformBlockInfo, 5> ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Metal>::uniforms = {
-    UniformBlockInfo{3, true, false, sizeof(FillOutlineDrawableUBO), "FillOutlineDrawableUBO"},
-    UniformBlockInfo{4, true, true, sizeof(FillOutlineEvaluatedPropsUBO), "FillOutlineEvaluatedPropsUBO"},
-    UniformBlockInfo{5, true, false, sizeof(FillOutlineInterpolateUBO), "FillOutlineInterpolateUBO"},
-    UniformBlockInfo{6, true, true, sizeof(FillOutlinePermutationUBO), "FillOutlinePermutationUBO"},
-    UniformBlockInfo{7, true, false, sizeof(ExpressionInputsUBO), "ExpressionInputsUBO"},
-};
-const std::array<TextureInfo, 0> ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Metal>::textures = {};
+//
+// Fill outline
 
-const std::array<AttributeInfo, 4> ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Metal>::attributes = {
-    AttributeInfo{0, gfx::AttributeDataType::Short2, 1, "a_pos"},
-    AttributeInfo{1, gfx::AttributeDataType::UShort4, 1, "a_pattern_from"},
-    AttributeInfo{2, gfx::AttributeDataType::UShort4, 1, "a_pattern_to"},
-    AttributeInfo{3, gfx::AttributeDataType::Float2, 1, "a_opacity"},
+using FillOutlineShaderSource = ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Metal>;
+
+const std::array<AttributeInfo, 3> FillOutlineShaderSource::attributes = {
+    AttributeInfo{fillUBOCount + 0, gfx::AttributeDataType::Short2, idFillPosVertexAttribute},
+    AttributeInfo{fillUBOCount + 1, gfx::AttributeDataType::Float4, idFillOutlineColorVertexAttribute},
+    AttributeInfo{fillUBOCount + 2, gfx::AttributeDataType::Float2, idFillOpacityVertexAttribute},
 };
-const std::array<UniformBlockInfo, 6> ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Metal>::uniforms = {
-    UniformBlockInfo{4, true, true, sizeof(FillPatternDrawableUBO), "FillPatternDrawableUBO"},
-    UniformBlockInfo{5, true, false, sizeof(FillPatternTilePropsUBO), "FillPatternTilePropsUBO"},
-    UniformBlockInfo{6, true, true, sizeof(FillPatternEvaluatedPropsUBO), "FillPatternEvaluatedPropsUBO"},
-    UniformBlockInfo{7, true, false, sizeof(FillPatternInterpolateUBO), "FillPatternInterpolateUBO"},
-    UniformBlockInfo{8, true, true, sizeof(FillPatternPermutationUBO), "FillPatternPermutationUBO"},
-    UniformBlockInfo{9, true, false, sizeof(ExpressionInputsUBO), "ExpressionInputsUBO"},
+const std::array<TextureInfo, 0> FillOutlineShaderSource::textures = {};
+
+//
+// Fill pattern
+
+using FillPatternShaderSource = ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Metal>;
+
+const std::array<AttributeInfo, 4> FillPatternShaderSource::attributes = {
+    AttributeInfo{fillUBOCount + 0, gfx::AttributeDataType::Short2, idFillPosVertexAttribute},
+    AttributeInfo{fillUBOCount + 1, gfx::AttributeDataType::UShort4, idFillPatternFromVertexAttribute},
+    AttributeInfo{fillUBOCount + 2, gfx::AttributeDataType::UShort4, idFillPatternToVertexAttribute},
+    AttributeInfo{fillUBOCount + 3, gfx::AttributeDataType::Float2, idFillOpacityVertexAttribute},
 };
-const std::array<TextureInfo, 1> ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Metal>::textures = {
-    TextureInfo{0, "u_image"},
+const std::array<TextureInfo, 1> FillPatternShaderSource::textures = {
+    TextureInfo{0, idFillImageTexture},
 };
 
-const std::array<AttributeInfo, 4>
-    ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::Metal>::attributes = {
-        AttributeInfo{0, gfx::AttributeDataType::Short2, 1, "a_pos"},
-        AttributeInfo{1, gfx::AttributeDataType::UShort4, 1, "a_pattern_from"},
-        AttributeInfo{2, gfx::AttributeDataType::UShort4, 1, "a_pattern_to"},
-        AttributeInfo{3, gfx::AttributeDataType::Float2, 1, "a_opacity"},
+//
+// Fill pattern outline
+
+using FillOutlinePatternShaderSource = ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::Metal>;
+
+const std::array<AttributeInfo, 4> FillOutlinePatternShaderSource::attributes = {
+    AttributeInfo{fillUBOCount + 0, gfx::AttributeDataType::Short2, idFillPosVertexAttribute},
+    AttributeInfo{fillUBOCount + 1, gfx::AttributeDataType::UShort4, idFillPatternFromVertexAttribute},
+    AttributeInfo{fillUBOCount + 2, gfx::AttributeDataType::UShort4, idFillPatternToVertexAttribute},
+    AttributeInfo{fillUBOCount + 3, gfx::AttributeDataType::Float2, idFillOpacityVertexAttribute},
 };
-const std::array<UniformBlockInfo, 6> ShaderSource<BuiltIn::FillOutlinePatternShader,
-                                                   gfx::Backend::Type::Metal>::uniforms = {
-    UniformBlockInfo{4, true, true, sizeof(FillOutlinePatternDrawableUBO), "FillOutlinePatternDrawableUBO"},
-    UniformBlockInfo{5, true, false, sizeof(FillOutlinePatternTilePropsUBO), "FillOutlinePatternTilePropsUBO"},
-    UniformBlockInfo{6, true, true, sizeof(FillOutlinePatternEvaluatedPropsUBO), "FillOutlinePatternEvaluatedPropsUBO"},
-    UniformBlockInfo{7, true, false, sizeof(FillOutlinePatternInterpolateUBO), "FillOutlinePatternInterpolateUBO"},
-    UniformBlockInfo{8, true, true, sizeof(FillOutlinePatternPermutationUBO), "FillOutlinePatternPermutationUBO"},
-    UniformBlockInfo{9, true, false, sizeof(ExpressionInputsUBO), "ExpressionInputsUBO"},
+const std::array<TextureInfo, 1> FillOutlinePatternShaderSource::textures = {
+    TextureInfo{0, idFillImageTexture},
 };
-const std::array<TextureInfo, 1> ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::Metal>::textures =
-    {
-        TextureInfo{0, "u_image"},
+
+//
+// Fill outline triangulated
+
+using FillOutlineTriangulatedShaderSource =
+    ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::Metal>;
+
+const std::array<AttributeInfo, 2> FillOutlineTriangulatedShaderSource::attributes = {
+    AttributeInfo{fillUBOCount + 0, gfx::AttributeDataType::Short2, idLinePosNormalVertexAttribute},
+    AttributeInfo{fillUBOCount + 1, gfx::AttributeDataType::UByte4, idLineDataVertexAttribute},
 };
+const std::array<TextureInfo, 0> FillOutlineTriangulatedShaderSource::textures = {};
 
 } // namespace shaders
 } // namespace mbgl

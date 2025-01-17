@@ -47,6 +47,8 @@ public:
     void runOnce();
     void stop();
 
+    void updateTime();
+
     /// Platform integration callback for platforms that do not have full
     /// run loop integration or don't want to block at the Mapbox GL Native
     /// loop. It will be called from any thread and is up to the platform
@@ -78,8 +80,11 @@ public:
         return std::make_unique<WorkRequest>(task);
     }
 
-    void schedule(std::function<void()> fn) override { invoke(std::move(fn)); }
+    void schedule(std::function<void()>&& fn) override { invoke(std::move(fn)); }
+    void schedule(const util::SimpleIdentity, std::function<void()>&& fn) override { schedule(std::move(fn)); }
     ::mapbox::base::WeakPtr<Scheduler> makeWeakPtr() override { return weakFactory.makeWeakPtr(); }
+
+    void waitForEmpty(const util::SimpleIdentity = util::SimpleIdentity::Empty) override;
 
     class Impl;
 
@@ -134,6 +139,7 @@ private:
 
     std::unique_ptr<Impl> impl;
     ::mapbox::base::WeakPtrFactory<Scheduler> weakFactory{this};
+    // Do not add members here, see `WeakPtrFactory`
 };
 
 } // namespace util

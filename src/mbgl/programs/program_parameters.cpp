@@ -1,5 +1,6 @@
 #include <mbgl/programs/program_parameters.hpp>
 
+#include <mbgl/util/hash.hpp>
 #include <mbgl/util/string.hpp>
 
 #include <string_view>
@@ -8,11 +9,13 @@
 namespace mbgl {
 
 ProgramParameters::ProgramParameters(const float pixelRatio, const bool overdraw)
-    : defines(2) {
+    : defines(2),
+      overdrawInspector(overdraw) {
     defines["DEVICE_PIXEL_RATIO"] = util::toString(pixelRatio, true);
     if (overdraw) {
         defines["OVERDRAW_INSPECTOR"] = std::string();
     }
+    definesHash = util::hash(getDefinesString());
 }
 
 ProgramParameters ProgramParameters::withShaderSource(const ProgramSource& source) const noexcept {
@@ -28,6 +31,12 @@ ProgramParameters ProgramParameters::withDefaultSource(const ProgramSource& sour
 
     ProgramParameters params = *this;
     params.defaultSources[static_cast<size_t>(source.backend)] = source;
+    return params;
+}
+
+ProgramParameters ProgramParameters::withProgramType(shaders::BuiltIn type) const noexcept {
+    ProgramParameters params = *this;
+    params.programType = type;
     return params;
 }
 

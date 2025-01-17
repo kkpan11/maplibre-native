@@ -1,168 +1,171 @@
 #pragma once
 
 #include <mbgl/shaders/layer_ubo.hpp>
+#include <mbgl/style/property_expression.hpp>
+#include <mbgl/util/bitmask_operations.hpp>
+
+#if MLN_DRAWABLE_RENDERER
+#include <mbgl/gfx/gpu_expression.hpp>
+#endif // MLN_DRAWABLE_RENDERER
 
 namespace mbgl {
 namespace shaders {
 
-struct alignas(16) LineUBO {
-    std::array<float, 4 * 4> matrix;
-    std::array<float, 2> units_to_pixels;
-    float ratio;
-    float device_pixel_ratio;
+//
+// Line
+
+struct alignas(16) LineDrawableUBO {
+    /*  0 */ std::array<float, 4 * 4> matrix;
+    /* 64 */ float ratio;
+
+    // Interpolations
+    /* 68 */ float color_t;
+    /* 72 */ float blur_t;
+    /* 76 */ float opacity_t;
+    /* 80 */ float gapwidth_t;
+    /* 84 */ float offset_t;
+    /* 88 */ float width_t;
+    /* 92 */ float pad1;
+    /* 96 */
 };
-static_assert(sizeof(LineUBO) % 16 == 0);
+static_assert(sizeof(LineDrawableUBO) == 6 * 16);
 
-using LineGradientUBO = LineUBO;
+//
+// Line gradient
 
-struct alignas(16) LinePropertiesUBO {
-    Color color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float pad1, pad2, pad3;
+struct alignas(16) LineGradientDrawableUBO {
+    /*  0 */ std::array<float, 4 * 4> matrix;
+    /* 64 */ float ratio;
+
+    // Interpolations
+    /* 68 */ float blur_t;
+    /* 72 */ float opacity_t;
+    /* 76 */ float gapwidth_t;
+    /* 80 */ float offset_t;
+    /* 84 */ float width_t;
+    /* 88 */ float pad1;
+    /* 92 */ float pad2;
+    /* 96 */
 };
-static_assert(sizeof(LinePropertiesUBO) % 16 == 0);
+static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16);
 
-struct alignas(16) LineGradientPropertiesUBO {
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float pad1, pad2, pad3;
+//
+// Line pattern
+
+struct alignas(16) LinePatternDrawableUBO {
+    /*  0 */ std::array<float, 4 * 4> matrix;
+    /* 64 */ float ratio;
+
+    // Interpolations
+    /* 68 */ float blur_t;
+    /* 72 */ float opacity_t;
+    /* 76 */ float gapwidth_t;
+    /* 80 */ float offset_t;
+    /* 84 */ float width_t;
+    /* 88 */ float pattern_from_t;
+    /* 92 */ float pattern_to_t;
+    /* 96 */
 };
-static_assert(sizeof(LineGradientPropertiesUBO) % 16 == 0);
+static_assert(sizeof(LinePatternDrawableUBO) == 6 * 16);
 
-struct alignas(16) LinePatternUBO {
-    std::array<float, 4 * 4> matrix;
-    std::array<float, 4> scale;
-    std::array<float, 2> texsize;
-    std::array<float, 2> units_to_pixels;
-    float ratio;
-    float device_pixel_ratio;
-    float fade;
-    float pad1;
+struct alignas(16) LinePatternTilePropsUBO {
+    /*  0 */ std::array<float, 4> pattern_from;
+    /* 16 */ std::array<float, 4> pattern_to;
+    /* 32 */ std::array<float, 4> scale;
+    /* 48 */ std::array<float, 2> texsize;
+    /* 56 */ float fade;
+    /* 60 */ float pad1;
+    /* 64 */
 };
-static_assert(sizeof(LinePatternUBO) % 16 == 0);
+static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16);
 
-struct alignas(16) LinePatternPropertiesUBO {
-    float blur;
-    float opacity;
-    float offset;
-    float gapwidth;
-    float width;
-    float pad1, pad2, pad3;
+//
+// Line SDF
+
+struct alignas(16) LineSDFDrawableUBO {
+    /*   0 */ std::array<float, 4 * 4> matrix;
+    /*  64 */ std::array<float, 2> patternscale_a;
+    /*  72 */ std::array<float, 2> patternscale_b;
+    /*  80 */ float tex_y_a;
+    /*  84 */ float tex_y_b;
+    /*  88 */ float ratio;
+
+    // Interpolations
+    /*  92 */ float color_t;
+    /*  96 */ float blur_t;
+    /* 100 */ float opacity_t;
+    /* 104 */ float gapwidth_t;
+    /* 108 */ float offset_t;
+    /* 112 */ float width_t;
+    /* 116 */ float floorwidth_t;
+    /* 120 */ float pad1;
+    /* 124 */ float pad2;
+    /* 128 */
 };
-static_assert(sizeof(LinePatternPropertiesUBO) % 16 == 0);
+static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16);
 
-struct alignas(16) LineSDFUBO {
-    std::array<float, 4 * 4> matrix;
-    std::array<float, 2> units_to_pixels;
-    std::array<float, 2> patternscale_a;
-    std::array<float, 2> patternscale_b;
-    float ratio;
-    float device_pixel_ratio;
-    float tex_y_a;
-    float tex_y_b;
-    float sdfgamma;
-    float mix;
+struct alignas(16) LineSDFTilePropsUBO {
+    /*  0 */ float sdfgamma;
+    /*  4 */ float mix;
+    /*  8 */ float pad1;
+    /* 12 */ float pad2;
+    /* 16 */
 };
-static_assert(sizeof(LineSDFUBO) % 16 == 0);
+static_assert(sizeof(LineSDFTilePropsUBO) == 16);
 
-struct alignas(16) LineSDFPropertiesUBO {
-    Color color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad1, pad2;
+/// Expression properties that do not depend on the tile
+enum class LineExpressionMask : uint32_t {
+    None = 0,
+    Color = 1 << 0,
+    Opacity = 1 << 1,
+    Blur = 1 << 2,
+    Width = 1 << 3,
+    GapWidth = 1 << 4,
+    FloorWidth = 1 << 5,
+    Offset = 1 << 6,
 };
-static_assert(sizeof(LineSDFPropertiesUBO) % 16 == 0);
 
-using LineBasicUBO = LineUBO;
-
-struct alignas(16) LineBasicPropertiesUBO {
-    Color color;
-    float opacity;
-    float width;
-    float pad1, pad2;
+struct alignas(16) LineExpressionUBO {
+    gfx::GPUExpression color;
+    gfx::GPUExpression blur;
+    gfx::GPUExpression opacity;
+    gfx::GPUExpression gapwidth;
+    gfx::GPUExpression offset;
+    gfx::GPUExpression width;
+    gfx::GPUExpression floorWidth;
 };
-static_assert(sizeof(LineBasicPropertiesUBO) % 16 == 0);
+static_assert(sizeof(LineExpressionUBO) % 16 == 0);
 
-/// Property interpolation UBOs
-struct alignas(16) LineInterpolationUBO {
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1, pad2;
+/// Evaluated properties that do not depend on the tile
+struct alignas(16) LineEvaluatedPropsUBO {
+    /*  0 */ Color color;
+    /* 16 */ float blur;
+    /* 20 */ float opacity;
+    /* 24 */ float gapwidth;
+    /* 28 */ float offset;
+    /* 32 */ float width;
+    /* 36 */ float floorwidth;
+    /* 40 */ LineExpressionMask expressionMask;
+    /* 44 */ float pad1;
+    /* 48 */
 };
-static_assert(sizeof(LineInterpolationUBO) % 16 == 0);
+static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16);
 
-struct alignas(16) LineGradientInterpolationUBO {
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1, pad2, pad3;
-};
-static_assert(sizeof(LineGradientInterpolationUBO) % 16 == 0);
+#if MLN_UBO_CONSOLIDATION
 
-struct alignas(16) LinePatternInterpolationUBO {
-    float blur_t;
-    float opacity_t;
-    float offset_t;
-    float gapwidth_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float pad1;
+union LineDrawableUnionUBO {
+    LineDrawableUBO lineDrawableUBO;
+    LineGradientDrawableUBO lineGradientDrawableUBO;
+    LinePatternDrawableUBO linePatternDrawableUBO;
+    LineSDFDrawableUBO lineSDFDrawableUBO;
 };
-static_assert(sizeof(LinePatternInterpolationUBO) % 16 == 0);
 
-struct alignas(16) LineSDFInterpolationUBO {
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float pad1;
+union LineTilePropsUnionUBO {
+    LinePatternTilePropsUBO linePatternTilePropsUBO;
+    LineSDFTilePropsUBO lineSDFTilePropsUBO;
 };
-static_assert(sizeof(LineSDFInterpolationUBO) % 16 == 0);
 
-/// Evaluated properties that depend on the tile
-struct alignas(16) LinePatternTilePropertiesUBO {
-    std::array<float, 4> pattern_from;
-    std::array<float, 4> pattern_to;
-};
-static_assert(sizeof(LinePatternTilePropertiesUBO) % 16 == 0);
-
-struct alignas(16) LinePermutationUBO {
-    /*  0 */ Attribute color;
-    /*  8 */ Attribute blur;
-    /* 16 */ Attribute opacity;
-    /* 24 */ Attribute gapwidth;
-    /* 32 */ Attribute offset;
-    /* 40 */ Attribute width;
-    /* 48 */ Attribute floorwidth;
-    /* 56 */ Attribute pattern_from;
-    /* 64 */ Attribute pattern_to;
-    /* 72 */ bool overdrawInspector;
-    /* 73 */ uint8_t pad1, pad2, pad3;
-    /* 76 */ float pad4;
-    /* 80 */
-};
-static_assert(sizeof(LinePermutationUBO) == 5 * 16);
+#endif
 
 } // namespace shaders
 } // namespace mbgl

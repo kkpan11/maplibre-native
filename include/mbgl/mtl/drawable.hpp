@@ -11,6 +11,7 @@ namespace mbgl {
 
 template <class AttributeList>
 class Segment;
+class PaintParameters;
 
 namespace gfx {
 
@@ -40,16 +41,10 @@ public:
 
     void setVertices(std::vector<uint8_t>&&, std::size_t, gfx::AttributeDataType) override;
 
-    const gfx::VertexAttributeArray& getVertexAttributes() const override;
-    void setVertexAttributes(const gfx::VertexAttributeArray& value) override;
-    void setVertexAttributes(gfx::VertexAttributeArray&& value) override;
-
-    gfx::VertexAttributeArray& mutableVertexAttributes() override;
-
     const gfx::UniformBufferArray& getUniformBuffers() const override;
     gfx::UniformBufferArray& mutableUniformBuffers() override;
 
-    void setVertexAttrNameId(const StringIdentity);
+    void setVertexAttrId(const size_t);
 
     void upload(gfx::UploadPass&);
 
@@ -62,6 +57,13 @@ public:
     void setSubLayerIndex(int32_t) override;
     void setDepthType(gfx::DepthMaskType) override;
 
+    void updateVertexAttributes(gfx::VertexAttributeArrayPtr,
+                                std::size_t vertexCount,
+                                gfx::DrawMode,
+                                gfx::IndexVectorBasePtr,
+                                const SegmentBase* segments,
+                                std::size_t segmentCount) override;
+
 protected:
     // For testing only.
     Drawable(std::unique_ptr<Impl>);
@@ -69,8 +71,7 @@ protected:
     void bindAttributes(RenderPass&) const noexcept;
     void unbindAttributes(RenderPass&) const noexcept {}
 
-    void bindUniformBuffers(RenderPass&) const noexcept;
-    void unbindUniformBuffers(RenderPass&) const noexcept {}
+    void bindInstanceAttributes(RenderPass&) const noexcept;
 
     void bindTextures(RenderPass&) const noexcept;
     void unbindTextures(RenderPass&) const noexcept;

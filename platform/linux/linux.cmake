@@ -15,6 +15,18 @@ find_package(Threads REQUIRED)
 pkg_search_module(WEBP libwebp REQUIRED)
 pkg_search_module(LIBUV libuv REQUIRED)
 
+if(MLN_WITH_WAYLAND)
+    # See https://github.com/maplibre/maplibre-native/pull/2022
+
+    # MLN_WITH_EGL needs to be set for Wayland, otherwise this CMakeLists will
+    # call find_package(OpenGL REQUIRED GLX), which is for X11.
+    set(MLN_WITH_EGL TRUE)
+
+    # OPENGL_USE_GLES2 or OPENGL_USE_GLES3 need to be set, otherwise
+    # FindOpenGL.cmake will include the GLVND library, which is for X11.
+    set(OPENGL_USE_GLES3 TRUE)
+endif()
+
 target_sources(
     mbgl-core
     PRIVATE
@@ -38,6 +50,7 @@ target_sources(
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/storage/offline_database.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/storage/offline_download.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/storage/online_file_source.cpp
+        ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/storage/$<IF:$<BOOL:${MLN_WITH_PMTILES}>,pmtiles_file_source.cpp,pmtiles_file_source_stub.cpp>
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/storage/sqlite3.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/text/bidi.cpp
         ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/text/local_glyph_rasterizer.cpp
@@ -79,6 +92,18 @@ if(MLN_WITH_EGL)
                 WL_EGL_PLATFORM
         )
     endif()
+elseif(MLN_WITH_VULKAN)
+    target_include_directories(
+        mbgl-core
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/vendor/Vulkan-Headers/include
+    )
+
+    target_sources(
+        mbgl-core
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}/platform/default/src/mbgl/vulkan/headless_backend.cpp
+    )
 else()
     find_package(OpenGL REQUIRED GLX)
     target_sources(
@@ -179,9 +204,7 @@ target_link_libraries(
     mbgl-test-runner
     PRIVATE
         mbgl-compiler-options
-        -Wl,--whole-archive
-        mbgl-test
-        -Wl,--no-whole-archive
+        $<LINK_LIBRARY:WHOLE_ARCHIVE,mbgl-test>
 )
 
 add_executable(
@@ -193,9 +216,7 @@ target_link_libraries(
     mbgl-benchmark-runner
     PRIVATE
         mbgl-compiler-options
-        -Wl,--whole-archive
-        mbgl-benchmark
-        -Wl,--no-whole-archive
+        $<LINK_LIBRARY:WHOLE_ARCHIVE,mbgl-benchmark>
 )
 
 add_executable(

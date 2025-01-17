@@ -8,22 +8,34 @@ namespace shaders {
 template <>
 struct ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::OpenGL> {
     static constexpr const char* name = "FillOutlineShader";
-    static constexpr const char* vertex = R"(layout (std140) uniform FillOutlineDrawableUBO {
+    static constexpr const char* vertex = R"(layout (std140) uniform GlobalPaintParamsUBO {
+    highp vec2 u_pattern_atlas_texsize;
+    highp vec2 u_units_to_pixels;
+    highp vec2 u_world_size;
+    highp float u_camera_to_center_distance;
+    highp float u_symbol_fade_change;
+    highp float u_aspect_ratio;
+    highp float u_pixel_ratio;
+    highp float u_map_zoom;
+    lowp float global_pad1;
+};
+
+layout (std140) uniform FillOutlineDrawableUBO {
     highp mat4 u_matrix;
-    highp vec2 u_world;
-};
-layout (std140) uniform FillOutlineEvaluatedPropsUBO {
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float padding_props1;
-    highp float padding_props2;
-    highp float padding_props3;
-};
-layout (std140) uniform FillOutlineInterpolateUBO {
+    // Interpolations
     highp float u_outline_color_t;
     highp float u_opacity_t;
-    highp float u_padding_interp1;
-    highp float u_padding_interp2;
+    lowp float drawable_pad1;
+    lowp float drawable_pad2;
+};
+
+layout (std140) uniform FillEvaluatedPropsUBO {
+    highp vec4 u_color;
+    highp vec4 u_outline_color;
+    highp float u_opacity;
+    highp float u_fade;
+    highp float u_from_scale;
+    highp float u_to_scale;
 };
 
 layout (location = 0) in vec2 a_pos;
@@ -52,21 +64,16 @@ lowp float opacity = u_opacity;
 #endif
 
     gl_Position = u_matrix * vec4(a_pos, 0, 1);
-    v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world;
+    v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
 }
 )";
-    static constexpr const char* fragment = R"(layout (std140) uniform FillOutlineEvaluatedPropsUBO {
+    static constexpr const char* fragment = R"(layout (std140) uniform FillEvaluatedPropsUBO {
+    highp vec4 u_color;
     highp vec4 u_outline_color;
     highp float u_opacity;
-    highp float padding_props1;
-    highp float padding_props2;
-    highp float padding_props3;
-};
-layout (std140) uniform FillOutlineInterpolateUBO {
-    highp float u_outline_color_t;
-    highp float u_opacity_t;
-    highp float u_padding_interp1;
-    highp float u_padding_interp2;
+    highp float u_fade;
+    highp float u_from_scale;
+    highp float u_to_scale;
 };
 
 in vec2 v_pos;

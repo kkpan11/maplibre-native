@@ -1,9 +1,15 @@
 #pragma once
 
 #include <mbgl/renderer/layer_group.hpp>
+#include <mbgl/mtl/uniform_buffer.hpp>
 
 namespace mbgl {
+
+class PaintParameters;
+
 namespace mtl {
+
+class RenderPass;
 
 /**
  A layer group for non-tile-based drawables
@@ -16,7 +22,12 @@ public:
     void upload(gfx::UploadPass&) override;
     void render(RenderOrchestrator&, PaintParameters&) override;
 
+    const gfx::UniformBufferArray& getUniformBuffers() const override { return uniformBuffers; };
+
+    gfx::UniformBufferArray& mutableUniformBuffers() override { return uniformBuffers; };
+
 protected:
+    UniformBufferArray uniformBuffers;
 };
 
 } // namespace mtl

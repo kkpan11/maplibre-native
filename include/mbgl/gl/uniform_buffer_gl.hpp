@@ -2,6 +2,7 @@
 
 #include <mbgl/gfx/uniform_buffer.hpp>
 #include <mbgl/gl/types.hpp>
+#include <mbgl/gl/buffer_allocator.hpp>
 
 namespace mbgl {
 namespace gl {
@@ -10,19 +11,35 @@ class UniformBufferGL final : public gfx::UniformBuffer {
     UniformBufferGL(const UniformBufferGL&);
 
 public:
-    UniformBufferGL(const void* data, std::size_t size_);
-    UniformBufferGL(UniformBufferGL&& other)
-        : UniformBuffer(std::move(other)) {}
+    UniformBufferGL(const void* data, std::size_t size_, IBufferAllocator& allocator);
     ~UniformBufferGL() override;
 
-    BufferID getID() const { return id; }
-    void update(const void* data, std::size_t size_) override;
+    UniformBufferGL(UniformBufferGL&& rhs) noexcept;
+    UniformBufferGL& operator=(const UniformBufferGL& rhs) = delete;
+
+    BufferID getID() const;
+    gl::RelocatableBuffer<UniformBufferGL>& getManagedBuffer() noexcept { return managedBuffer; }
+    const gl::RelocatableBuffer<UniformBufferGL>& getManagedBuffer() const noexcept { return managedBuffer; }
 
     UniformBufferGL clone() const { return {*this}; }
 
-protected:
-    BufferID id = 0;
-    uint32_t hash;
+    // gfx::UniformBuffer
+    void update(const void* data, std::size_t dataSize) override;
+
+private:
+    // unique id used for debugging and profiling purposes
+    // localID should not be used as unique id because a const buffer pool is managed using IBufferAllocator
+// Currently unique IDs for constant buffers are only used when Tracy profiling is enabled
+#ifdef MLN_TRACY_ENABLE
+    int64_t uniqueDebugId = -1;
+#endif
+
+    // If the requested UBO size is too large for the allocator, the UBO will manage its own allocation
+    bool isManagedAllocation = false;
+    BufferID localID;
+    gl::RelocatableBuffer<UniformBufferGL> managedBuffer;
+
+    friend class UniformBufferArrayGL;
 };
 
 /// Stores a collection of uniform buffers by name
@@ -41,6 +58,9 @@ public:
         UniformBufferArray::operator=(other);
         return *this;
     }
+
+    void bind() const;
+    void unbind() const;
 
 private:
     std::unique_ptr<gfx::UniformBuffer> copy(const gfx::UniformBuffer& uniformBuffers) override {

@@ -20,10 +20,9 @@ public:
 protected:
     gfx::UniformBufferPtr evaluatedPropsUniformBuffer;
 
-#if MLN_RENDER_BACKEND_METAL
-    gfx::UniformBufferPtr permutationUniformBuffer;
-    gfx::UniformBufferPtr expressionUniformBuffer;
-#endif // MLN_RENDER_BACKEND_METAL
+#if MLN_UBO_CONSOLIDATION
+    gfx::UniformBufferPtr drawableUniformBuffer;
+#endif
 };
 
 } // namespace mbgl

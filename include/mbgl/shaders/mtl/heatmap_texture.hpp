@@ -2,11 +2,29 @@
 
 #include <mbgl/shaders/heatmap_texture_layer_ubo.hpp>
 #include <mbgl/shaders/shader_source.hpp>
-#include <mbgl/shaders/mtl/common.hpp>
 #include <mbgl/shaders/mtl/shader_program.hpp>
 
 namespace mbgl {
 namespace shaders {
+
+constexpr auto heatmapTextureShaderPrelude = R"(
+
+enum {
+    idHeatmapTexturePropsUBO = drawableReservedUBOCount,
+    heatmapTextureUBOCount
+};
+
+struct alignas(16) HeatmapTexturePropsUBO {
+    /*  0 */ float4x4 matrix;
+    /* 64 */ float opacity;
+    /* 68 */ float pad1;
+    /* 72 */ float pad2;
+    /* 76 */ float pad3;
+    /* 80 */
+};
+static_assert(sizeof(HeatmapTexturePropsUBO) == 5 * 16, "wrong size");
+
+)";
 
 template <>
 struct ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::Metal> {
@@ -15,13 +33,14 @@ struct ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::Metal> {
     static constexpr auto fragmentMainFunction = "fragmentMain";
 
     static const std::array<AttributeInfo, 1> attributes;
-    static const std::array<UniformBlockInfo, 1> uniforms;
+    static constexpr std::array<AttributeInfo, 0> instanceAttributes{};
     static const std::array<TextureInfo, 2> textures;
 
+    static constexpr auto prelude = heatmapTextureShaderPrelude;
     static constexpr auto source = R"(
 
 struct VertexStage {
-    short2 pos [[attribute(0)]];
+    short2 pos [[attribute(heatmapTextureUBOCount + 0)]];
 };
 
 struct FragmentStage {
@@ -29,19 +48,12 @@ struct FragmentStage {
     float2 pos;
 };
 
-struct alignas(16) HeatmapTextureDrawableUBO {
-    float4x4 matrix;
-    float2 world;
-    float opacity;
-    bool overdrawInspector;
-    uint8_t pad1, pad2, pad3;
-};
-
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const HeatmapTextureDrawableUBO& drawable [[buffer(1)]]) {
+                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
+                                device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]]) {
 
     const float2 pos = float2(vertx.pos);
-    const float4 position = drawable.matrix * float4(pos * drawable.world, 0, 1);
+    const float4 position = props.matrix * float4(pos * paintParams.world_size, 0, 1);
 
     return {
         .position    = position,
@@ -50,19 +62,19 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HeatmapTextureDrawableUBO& drawable [[buffer(1)]],
+                            device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]],
                             texture2d<float, access::sample> image [[texture(0)]],
                             texture2d<float, access::sample> color_ramp [[texture(1)]],
                             sampler image_sampler [[sampler(0)]],
                             sampler color_ramp_sampler [[sampler(1)]]) {
 
-    if (drawable.overdrawInspector) {
-        return half4(0.0);
-    }
+#if defined(OVERDRAW_INSPECTOR)
+    return half4(1.0);
+#endif
 
     float t = image.sample(image_sampler, in.pos).r;
     float4 color = color_ramp.sample(color_ramp_sampler, float2(t, 0.5));
-    return half4(color * drawable.opacity);
+    return half4(color * props.opacity);
 }
 )";
 };
